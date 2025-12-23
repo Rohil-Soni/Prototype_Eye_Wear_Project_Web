@@ -17,13 +17,13 @@ let threeCanvas: HTMLCanvasElement | undefined;
 
 // ===== Adjustment parameters =====
 const adjustments = {
-  positionX: 0,      // horizontal offset
-  positionY: -0.15,  // vertical offset (relative to eye distance)
+  positionX: 0.170,      // horizontal offset
+  positionY: -0.230,  // vertical offset (relative to eye distance)
   positionZ: 0,      // depth
-  rotationX: 0,      // pitch (up/down)
+  rotationX: 1.650,      // pitch (up/down)
   rotationY: 0,      // yaw (left/right)
   rotationZ: 0,      // roll (with head tilt - auto, but can add manual)
-  scaleMultiplier: 0.0015, // size factor (eyeDistance * this)
+  scaleMultiplier: 0.0025, // size factor (eyeDistance * this)
   debugMode: true
 };
 
@@ -227,7 +227,7 @@ function drawGlasses(landmarks: any[]): void {
   ctx.arc(nx + 3, ny, 2, 0, 2 * Math.PI);
   ctx.fill();
 
-  // ===== Drive 3D model with ear-aware positioning =====
+  // ===== Drive 3D model with proper 3D head pose =====
   const dx = rx - lx;
   const dy = ry - ly;
   const eyeDistance = Math.hypot(dx, dy);
@@ -237,24 +237,25 @@ function drawGlasses(landmarks: any[]): void {
 
   const leftEar = landmarks[234];   // left ear
   const rightEar = landmarks[454];  // right ear
+  const noseTip = landmarks[4];      // nose tip
+  const foreheadTop = landmarks[10]; // forehead/between eyes top
 
-  if (glassesModel && threeCamera && leftEar && rightEar) {
-    // Calculate ear positions in pixels
+  if (glassesModel && threeCamera && leftEar && rightEar && noseTip && foreheadTop) {
+    // 2D pixel positions
     const leftEarX = leftEar.x * w;
     const leftEarY = leftEar.y * h;
     const rightEarX = rightEar.x * w;
     const rightEarY = rightEar.y * h;
 
-    // Distance from eye center to ear = how wide glasses should spread
-    const leftEarDistance = Math.hypot(leftEarX - leftCenterX, leftEarY - leftCenterY);
-    const rightEarDistance = Math.hypot(rightEarX - rightCenterX, rightEarY - rightCenterY);
-    const avgEarDistance = (leftEarDistance + rightEarDistance) / 2;
+    // Z-depth values (normalized ~0.1 to 0.9, where smaller = closer)
+    const leftEarZ = leftEar.z || 0;
+    const rightEarZ = rightEar.z || 0;
+    const noseTipZ = noseTip.z || 0;
+    const foreheadZ = foreheadTop.z || 0;
 
-    // Compute position based on eyes + ears average
+    // 1. Position: blend eyes + ears
     const earAwareX = (leftEarX + rightEarX) / 2;
     const earAwareY = (leftEarY + rightEarY) / 2;
-
-    // Blend eye center with ear-aware position (60% ear, 40% eye)
     const finalX = centerX * 0.4 + earAwareX * 0.6;
     const finalY = centerY * 0.4 + earAwareY * 0.6;
 
@@ -264,48 +265,71 @@ function drawGlasses(landmarks: any[]): void {
     const vec = new THREE.Vector3(nxNorm, nyNorm, adjustments.positionZ).unproject(threeCamera);
     glassesModel.position.copy(vec);
 
-    // Scale: use larger scale to reach ears
-    const scaleDistance = Math.max(eyeDistance, avgEarDistance);
+    // 2. Scale
+    const scaleDistance = Math.max(eyeDistance, Math.hypot(rightEarX - leftEarX, rightEarY - leftEarY));
     const s = scaleDistance * adjustments.scaleMultiplier;
     glassesModel.scale.set(s, s, s);
 
-    // Rotation: use ear-based angle for more natural tilt
+    // 3. Rotation: use 3D z-depth for head pose
+    // === YAW (head left/right) ===
+    // If left ear is further away (bigger z) than right ear, head is turning right
+    const yawFromEars = (rightEarZ - leftEarZ) * 2; // scale up for more rotation
+
+    // === PITCH (head up/down) ===
+    // If forehead is closer (smaller z) than nose, head is tilted down
+    const pitchFromFace = (foreheadZ - noseTipZ) * 3;
+
+    // === ROLL (head tilt left/right) ===
+    // Compute from ear positions
     const earDx = rightEarX - leftEarX;
     const earDy = rightEarY - leftEarY;
-    const earAngle = Math.atan2(earDy, earDx);
+    const rollFromEars = Math.atan2(earDy, earDx);
 
-    glassesModel.rotation.order = 'XYZ';
-    glassesModel.rotation.x = adjustments.rotationX;
-    glassesModel.rotation.y = adjustments.rotationY;
-    glassesModel.rotation.z = earAngle + adjustments.rotationZ;
+    glassesModel.rotation.order = 'YXZ'; // important: yaw first, then pitch, then roll
+    glassesModel.rotation.y = yawFromEars + adjustments.rotationY;  // YAW (left/right turn)
+    glassesModel.rotation.x = pitchFromFace + adjustments.rotationX; // PITCH (up/down)
+    glassesModel.rotation.z = rollFromEars + adjustments.rotationZ;   // ROLL (tilt)
 
     // Debug info
     if (adjustments.debugMode) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(10, 10, 350, 250);
+      ctx.fillRect(10, 10, 380, 280);
 
       ctx.fillStyle = 'rgb(0, 255, 0)';
       ctx.font = '12px monospace';
       let y = 30;
       const lineHeight = 15;
 
+      ctx.fillText(`=== POSITION ===`, 20, y);
+      y += lineHeight;
       ctx.fillText(`posX: ${adjustments.positionX.toFixed(3)} (Q/W)`, 20, y);
       y += lineHeight;
       ctx.fillText(`posY: ${adjustments.positionY.toFixed(3)} (A/S)`, 20, y);
       y += lineHeight;
       ctx.fillText(`posZ: ${adjustments.positionZ.toFixed(3)} (Z/X)`, 20, y);
       y += lineHeight;
-      ctx.fillText(`rotX: ${adjustments.rotationX.toFixed(3)} (E/R)`, 20, y);
+
+      ctx.fillText(`=== ROTATION (3D) ===`, 20, y);
       y += lineHeight;
-      ctx.fillText(`rotY: ${adjustments.rotationY.toFixed(3)} (T/Y)`, 20, y);
+      ctx.fillText(`YAW (L/R): ${(glassesModel.rotation.y).toFixed(3)} (T/Y)`, 20, y);
       y += lineHeight;
-      ctx.fillText(`rotZ: ${adjustments.rotationZ.toFixed(3)} (U/I)`, 20, y);
+      ctx.fillText(`PITCH (U/D): ${(glassesModel.rotation.x).toFixed(3)} (E/R)`, 20, y);
       y += lineHeight;
+      ctx.fillText(`ROLL: ${(glassesModel.rotation.z).toFixed(3)} (U/I)`, 20, y);
+      y += lineHeight;
+
+      ctx.fillText(`=== HEAD POSE (Z-depth) ===`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`leftEarZ: ${leftEarZ.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`rightEarZ: ${rightEarZ.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`yaw: ${yawFromEars.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`pitch: ${pitchFromFace.toFixed(3)}`, 20, y);
+      y += lineHeight;
+
       ctx.fillText(`scale: ${adjustments.scaleMultiplier.toFixed(4)} (P/O)`, 20, y);
-      y += lineHeight;
-      ctx.fillText(`earDist: ${avgEarDistance.toFixed(1)}px`, 20, y);
-      y += lineHeight;
-      ctx.fillText(`eyeDist: ${eyeDistance.toFixed(1)}px`, 20, y);
       y += lineHeight;
       ctx.fillText(`Press H to hide debug`, 20, y);
     }
