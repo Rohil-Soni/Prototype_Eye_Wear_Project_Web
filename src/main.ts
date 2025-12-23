@@ -27,6 +27,45 @@ const adjustments = {
   debugMode: true
 };
 
+// ===== Bookmark storage =====
+const BOOKMARK_KEY = 'glasses-adjustments-bookmark';
+
+function saveBookmark(): void {
+  const bookmark = {
+    positionX: adjustments.positionX,
+    positionY: adjustments.positionY,
+    positionZ: adjustments.positionZ,
+    rotationX: adjustments.rotationX,
+    rotationY: adjustments.rotationY,
+    rotationZ: adjustments.rotationZ,
+    scaleMultiplier: adjustments.scaleMultiplier
+  };
+  localStorage.setItem(BOOKMARK_KEY, JSON.stringify(bookmark));
+  console.log('🔖 Bookmark saved!', bookmark);
+}
+
+function loadBookmark(): boolean {
+  const saved = localStorage.getItem(BOOKMARK_KEY);
+  if (saved) {
+    try {
+      const bookmark = JSON.parse(saved);
+      adjustments.positionX = bookmark.positionX;
+      adjustments.positionY = bookmark.positionY;
+      adjustments.positionZ = bookmark.positionZ;
+      adjustments.rotationX = bookmark.rotationX;
+      adjustments.rotationY = bookmark.rotationY;
+      adjustments.rotationZ = bookmark.rotationZ;
+      adjustments.scaleMultiplier = bookmark.scaleMultiplier;
+      console.log('✅ Bookmark loaded!', bookmark);
+      return true;
+    } catch (e) {
+      console.error('❌ Failed to load bookmark', e);
+      return false;
+    }
+  }
+  return false;
+}
+
 // Root element
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -332,6 +371,8 @@ function drawGlasses(landmarks: any[]): void {
       ctx.fillText(`scale: ${adjustments.scaleMultiplier.toFixed(4)} (P/O)`, 20, y);
       y += lineHeight;
       ctx.fillText(`Press H to hide debug`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`Press B to bookmark | Press N to load`, 20, y);
     }
   }
 
@@ -416,6 +457,20 @@ function setupKeyboardControls() {
     // Log current values
     if (key === 'L') {
       console.log('Current adjustments:', { ...adjustments });
+    }
+
+    // Bookmark - save current settings
+    if (key === 'B') {
+      saveBookmark();
+    }
+
+    // Load bookmarked settings
+    if (key === 'N') {
+      if (loadBookmark()) {
+        console.log('✅ Loaded bookmarked settings');
+      } else {
+        console.log('ℹ️ No bookmark found');
+      }
     }
   });
 }
