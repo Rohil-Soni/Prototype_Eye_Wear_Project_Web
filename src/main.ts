@@ -118,8 +118,6 @@ function initThreeOverlay() {
   dir.position.set(0, 1, 2);
   threeScene.add(dir);
 
-  // BOOKMARKED: 3D model loading disabled to show 2D canvas only
-  /*
   const loader = new GLTFLoader();
   loader.load(
     '/models/glasses.glb', // put your model at public/models/glasses.glb
@@ -144,7 +142,6 @@ function initThreeOverlay() {
       console.error('❌ Failed to load glasses model', err);
     }
   );
-  */
 }
 
 // ====================== Draw 2D + drive 3D ======================
@@ -314,13 +311,10 @@ function drawGlasses(landmarks: any[]): void {
     }
   }
 
-  // BOOKMARKED: Three.js rendering disabled
-  /*
   // Render Three.js
   if (threeRenderer && threeScene && threeCamera) {
     threeRenderer.render(threeScene, threeCamera);
   }
-  */
 }
 
 // ====================== Detection loop ======================
