@@ -23,13 +23,13 @@ let rightStemBone: THREE.Bone | undefined;
 
 // ===== Adjustment parameters =====
 const adjustments = {
-  positionX: 0.0,      // horizontal offset
-  positionY: -0.15,  // vertical offset (relative to eye distance)
-  positionZ: 0,      // depth
-  rotationX: 0,      // pitch (up/down)
-  rotationY: 0,      // yaw (left/right)
-  rotationZ: 0,      // roll (with head tilt - auto, but can add manual)
-  scaleMultiplier: 0.0015, // size factor (eyeDistance * this)
+  positionX: 0.0,
+  positionY: -0.10,
+  positionZ: 0,
+  rotationX: 0,
+  rotationY: 0,
+  rotationZ: 0,
+  scaleMultiplier: 0.0012,   // 0.0005 se niche mat jao
   debugMode: true
 };
 
@@ -160,9 +160,9 @@ function initThreeOverlay() {
   threeRenderer.setSize(width, height);
   threeRenderer.setPixelRatio(window.devicePixelRatio);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.8);   // 0.6 → 0.8
   threeScene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.0);   // 0.8 → 1.0
   dir.position.set(0, 1, 2);
   threeScene.add(dir);
 
@@ -185,15 +185,25 @@ function initThreeOverlay() {
           rightStemBone = skeleton.getBoneByName('Bone005');
         }
 
-        if ((child as any).isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
+        if (child instanceof THREE.SkinnedMesh || (child as any).isMesh) {
+          const mesh = child as THREE.Mesh;
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+
+          mat.color.set(0x000000);        // pure black frame
+          mat.metalness = 0.0;
+          mat.roughness = 0.4;
+          mat.transparent = false;        // force opaque
+          mat.opacity = 1.0;
+          mat.side = THREE.FrontSide;     // ya DoubleSide agar zarurat ho
+
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
         }
       });
 
       // ✨ Base size/position
-      glassesModel.scale.set(0.02, 0.02, 0.02);   // chhota
-      glassesModel.position.set(0, 0, 0);         // origin
+      glassesModel.scale.set(1, 1, 1);
+      glassesModel.position.set(0, 0, 0);
       glassesModel.rotation.set(0, 0, 0);
       glassesModel.visible = true;
 
@@ -295,104 +305,112 @@ function drawGlasses(landmarks: any[]): void {
   const dy = ry - ly;
   const eyeDistance = Math.hypot(dx, dy);
 
-  const centerX = nx;
-  const centerY = ny - eyeDistance * 0.15;
-
   const leftEar = landmarks[234];   // left ear
   const rightEar = landmarks[454];  // right ear
   const noseTip = landmarks[4];      // nose tip
   const foreheadTop = landmarks[10]; // forehead/between eyes top
 
-  // if (glassesModel && threeCamera && leftEar && rightEar && noseTip && foreheadTop) {
-  //   // 2D pixel positions
-  //   const leftEarX = leftEar.x * w;
-  //   const leftEarY = leftEar.y * h;
-  //   const rightEarX = rightEar.x * w;
-  //   const rightEarY = rightEar.y * h;
+  // ==== 3D GLASSES ANCHOR ====
+  if (glassesModel && threeCamera && leftEar && rightEar && noseTip && foreheadTop) {
+    const leftEarX = leftEar.x * w;
+    const leftEarY = leftEar.y * h;
+    const rightEarX = rightEar.x * w;
+    const rightEarY = rightEar.y * h;
 
-  //   // Z-depth values (normalized ~0.1 to 0.9, where smaller = closer)
-  //   const leftEarZ = leftEar.z || 0;
-  //   const rightEarZ = rightEar.z || 0;
-  //   const noseTipZ = noseTip.z || 0;
-  //   const foreheadZ = foreheadTop.z || 0;
+    // Eye centers already computed above:
+    // leftCenterX, leftCenterY, rightCenterX, rightCenterY
 
-  //   // 1. Position
-  //   const earAwareX = (leftEarX + rightEarX) / 2;
-  //   const earAwareY = (leftEarY + rightEarY) / 2;
-  //   const finalX = centerX * 0.4 + earAwareX * 0.6;
-  //   const finalY = centerY * 0.4 + earAwareY * 0.6;
+    // 1) Face center between eyes
+    const faceCenterX = (leftCenterX + rightCenterX) * 0.5;
+    const faceCenterY = (leftCenterY + rightCenterY) * 0.5;
 
-  //   const nxNorm = (finalX / w) * 2 - 1 + adjustments.positionX;
-  //   const nyNorm = -(finalY / h) * 2 + 1 + adjustments.positionY * eyeDistance / h;
+    // 2) Target anchor: slightly above eyes (towards eyebrows)
+    let targetX = faceCenterX;
+    let targetY = faceCenterY - eyeDistance * 0.20;
 
-  //   const vec = new THREE.Vector3(nxNorm, nyNorm, -1).unproject(threeCamera);  // ← change -1 depth
-  //   glassesModel.position.copy(vec);
+    // 3) Apply manual offsets in pixels
+    targetX += adjustments.positionX * w;      // Q/W
+    targetY += adjustments.positionY * h;      // A/S
 
-  //   // 2. Scale (larger for visibility)
-  //   const scaleDistance = Math.max(eyeDistance, Math.hypot(rightEarX - leftEarX, rightEarY - leftEarY));
-  //   const s = scaleDistance * 0.01;  // ← increase multiplier
-  //   glassesModel.scale.set(s, s, s);
+    // 4) Convert to NDC
+    const ndcX = (targetX / w) * 2 - 1;
+    const ndcY = -(targetY / h) * 2 + 1;
 
-  //   // 3. Rotation
-  //   const yawFromEars = (rightEarZ - leftEarZ) * 2;
-  //   const pitchFromFace = (foreheadZ - noseTipZ) * 3;
-  //   const earDx = rightEarX - leftEarX;
-  //   const earDy = rightEarY - leftEarY;
-  //   const rollFromEars = Math.atan2(earDy, earDx);
+    // 5) Unproject to world (fix depth at -1 in front of camera)
+    const depth = -1;
+    const worldPos = new THREE.Vector3(ndcX, ndcY, depth).unproject(threeCamera);
+    glassesModel.position.copy(worldPos);
 
-  //   glassesModel.rotation.order = 'YXZ';
-  //   glassesModel.rotation.y = yawFromEars + adjustments.rotationY;
-  //   glassesModel.rotation.x = pitchFromFace + adjustments.rotationX;
-  //   glassesModel.rotation.z = rollFromEars + adjustments.rotationZ;
+    // 6) Scale from eye distance
+    const s = eyeDistance * adjustments.scaleMultiplier;
+    glassesModel.scale.set(s, s, s);
 
-  //   glassesModel.visible = true;  // ← add this
+    // 7) Head pose rotation (same as before)
+    const leftEarZ = leftEar.z || 0;
+    const rightEarZ = rightEar.z || 0;
+    const noseTipZ = noseTip.z || 0;
+    const foreheadZ = foreheadTop.z || 0;
 
-  //   // Debug info
-  //   if (adjustments.debugMode) {
-  //     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-  //     ctx.fillRect(10, 10, 380, 280);
+    const yawFromEars = (rightEarZ - leftEarZ) * 2;
+    const pitchFromFace = (foreheadZ - noseTipZ) * 3;
 
-  //     ctx.fillStyle = 'rgb(0, 255, 0)';
-  //     ctx.font = '12px monospace';
-  //     let y = 30;
-  //     const lineHeight = 15;
+    const earDx = rightEarX - leftEarX;
+    const earDy = rightEarY - leftEarY;
+    const rollFromEars = Math.atan2(earDy, earDx);
 
-  //     ctx.fillText(`=== POSITION ===`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`posX: ${adjustments.positionX.toFixed(3)} (Q/W)`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`posY: ${adjustments.positionY.toFixed(3)} (A/S)`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`posZ: ${adjustments.positionZ.toFixed(3)} (Z/X)`, 20, y);
-  //     y += lineHeight;
+    glassesModel.rotation.order = 'YXZ';
+    glassesModel.rotation.y = yawFromEars + adjustments.rotationY;
+    glassesModel.rotation.x = pitchFromFace + adjustments.rotationX;
+    glassesModel.rotation.z = rollFromEars + adjustments.rotationZ;
 
-  //     ctx.fillText(`=== ROTATION (3D) ===`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`YAW (L/R): ${(glassesModel.rotation.y).toFixed(3)} (T/Y)`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`PITCH (U/D): ${(glassesModel.rotation.x).toFixed(3)} (E/R)`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`ROLL: ${(glassesModel.rotation.z).toFixed(3)} (U/I)`, 20, y);
-  //     y += lineHeight;
+    glassesModel.visible = true;
 
-  //     ctx.fillText(`=== HEAD POSE (Z-depth) ===`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`leftEarZ: ${leftEarZ.toFixed(3)}`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`rightEarZ: ${rightEarZ.toFixed(3)}`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`yaw: ${yawFromEars.toFixed(3)}`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`pitch: ${pitchFromFace.toFixed(3)}`, 20, y);
-  //     y += lineHeight;
+    // Debug info
+    if (adjustments.debugMode) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(10, 10, 380, 280);
 
-  //     ctx.fillText(`scale: ${adjustments.scaleMultiplier.toFixed(4)} (P/O)`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`Press H to hide debug`, 20, y);
-  //     y += lineHeight;
-  //     ctx.fillText(`Press B to bookmark | Press N to load`, 20, y);
-  //   }
-  // }
+      ctx.fillStyle = 'rgb(0, 255, 0)';
+      ctx.font = '12px monospace';
+      let y = 30;
+      const lineHeight = 15;
+
+      ctx.fillText(`=== POSITION ===`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`posX: ${adjustments.positionX.toFixed(3)} (Q/W)`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`posY: ${adjustments.positionY.toFixed(3)} (A/S)`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`posZ: ${adjustments.positionZ.toFixed(3)} (Z/X)`, 20, y);
+      y += lineHeight;
+
+      ctx.fillText(`=== ROTATION (3D) ===`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`YAW (L/R): ${(glassesModel.rotation.y).toFixed(3)} (T/Y)`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`PITCH (U/D): ${(glassesModel.rotation.x).toFixed(3)} (E/R)`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`ROLL: ${(glassesModel.rotation.z).toFixed(3)} (U/I)`, 20, y);
+      y += lineHeight;
+
+      ctx.fillText(`=== HEAD POSE (Z-depth) ===`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`leftEarZ: ${leftEarZ.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`rightEarZ: ${rightEarZ.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`yaw: ${yawFromEars.toFixed(3)}`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`pitch: ${pitchFromFace.toFixed(3)}`, 20, y);
+      y += lineHeight;
+
+      ctx.fillText(`scale: ${adjustments.scaleMultiplier.toFixed(4)} (P/O)`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`Press H to hide debug`, 20, y);
+      y += lineHeight;
+      ctx.fillText(`Press B to bookmark | Press N to load`, 20, y);
+    }
+  }
 
   // Render Three.js
   if (threeRenderer && threeScene && threeCamera) {
@@ -517,6 +535,9 @@ async function main(): Promise<void> {
     // Now that canvas size is known, init Three overlay
     initThreeOverlay();
 
+    // Setup keyboard controls
+    setupKeyboardControls();
+
     console.log('✅ Ready - Detecting faces...');
     detect();
   } catch (error) {
@@ -525,6 +546,3 @@ async function main(): Promise<void> {
 }
 
 main();
-{
-  setupKeyboardControls();
-}
