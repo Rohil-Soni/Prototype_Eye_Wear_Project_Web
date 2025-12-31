@@ -184,54 +184,65 @@ function initThreeOverlay() {
       console.log('✅ GLB loaded ok');
       glassesModel = gltf.scene;
 
+      // ===== RECURSIVE MATERIAL FIX =====
       gltf.scene.traverse((child) => {
-        if (child instanceof THREE.SkinnedMesh || (child as any).isMesh) {
-          const mesh = child as THREE.Mesh;
-          
-          // ===== MATERIAL OVERRIDE (NO TRANSPARENCY) =====
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach(mat => {
-              if (mat instanceof THREE.MeshStandardMaterial) {
-                mat.transparent = false;
-                mat.opacity = 1.0;
-                mat.color.setHex(0x111111);  // dark frame
-                mat.metalness = 0.1;
-                mat.roughness = 0.3;
-                mat.side = THREE.DoubleSide;
-              }
-            });
-          } else if (mesh.material instanceof THREE.MeshStandardMaterial) {
-            mesh.material.transparent = false;
-            mesh.material.opacity = 1.0;
-            mesh.material.color.setHex(0x111111);
-            mesh.material.metalness = 0.1;
-            mesh.material.roughness = 0.3;
-            mesh.material.side = THREE.DoubleSide;
-          }
-
-          // ===== MESH PROPERTIES =====
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          mesh.visible = true;
-        }
-
-        // ===== BONE ACCESS =====
+        // 1) BONE MAPPING (first, before material changes)
         if (child instanceof THREE.SkinnedMesh) {
           skeleton = child.skeleton;
           headBone = skeleton.getBoneByName('Bone');
           leftStemBone = skeleton.getBoneByName('Bone001');
           rightStemBone = skeleton.getBoneByName('Bone005');
+          console.log('🦴 Bones mapped:', { 
+            head: !!headBone, 
+            left: !!leftStemBone, 
+            right: !!rightStemBone 
+          });
+        }
+
+        // 2) MESH PROPERTIES
+        if ((child as any).isMesh) {
+          const mesh = child as THREE.Mesh;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.frustumCulled = false; // prevent culling issues
+
+          // 3) MATERIAL FIX (CRITICAL)
+          if (mesh.material) {
+            const materials = Array.isArray(mesh.material) 
+              ? mesh.material 
+              : [mesh.material];
+
+            materials.forEach((mat: any) => {
+              // Kill transparency at source
+              mat.transparent = false;
+              mat.alphaTest = 0; // disable alpha testing
+              mat.opacity = 1.0;
+              mat.needsUpdate = true; // CRITICAL: force Three.js to recompile material
+
+              // Force solid black frame
+              if (mat.color) mat.color.setHex(0x1a1a1a);
+              if (mat.metalness !== undefined) mat.metalness = 0.05;
+              if (mat.roughness !== undefined) mat.roughness = 0.4;
+
+              console.log(`✅ Material fixed:`, {
+                name: mesh.name,
+                transparent: mat.transparent,
+                opacity: mat.opacity,
+                alphaTest: mat.alphaTest
+              });
+            });
+          }
         }
       });
 
-      // ===== BASE TRANSFORM (CORRECT Z-DIRECTION) =====
-      glassesModel.scale.set(0.0001, 0.0001, 0.0001);  // Extremely small base for large model
+      // BASE TRANSFORM
+      glassesModel.scale.set(0.0001, 0.0001, 0.0001);
       glassesModel.position.set(0, 0, 0);
-      glassesModel.rotation.set(0, 0, 0);  // No rotation override
+      glassesModel.rotation.set(0, 0, 0);
       glassesModel.visible = true;
 
       threeScene?.add(glassesModel);
-      console.log('✅ Model loaded with fixed materials + rotation');
+      console.log('✅ Model loaded + materials opaque');
     },
     undefined,
     (error) => console.error('❌ GLB Error:', error)
