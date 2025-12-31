@@ -24,12 +24,16 @@ let rightStemBone: THREE.Bone | undefined;
 // ===== Adjustment parameters =====
 const adjustments = {
   positionX: 0.0,
-  positionY: -0.10,
+  positionY: 0.0,  // starting at 0
   positionZ: 0,
   rotationX: 0,
   rotationY: 0,
   rotationZ: 0,
-  scaleMultiplier: 0.0012,   // 0.0005 se niche mat jao
+  scale: 0.002,  // base scale value
+  autoSize: true,  // automatically adjust size based on face
+  // Calibrated offsets from perfect fit reference (posX: 0.060, posY: 0.130)
+  calibratedOffsetX: 0.060,  // X offset for proper centering
+  calibratedOffsetY: 0.130,  // Y offset for proper height on nose bridge
   debugMode: true
 };
 
@@ -44,7 +48,7 @@ function saveBookmark(): void {
     rotationX: adjustments.rotationX,
     rotationY: adjustments.rotationY,
     rotationZ: adjustments.rotationZ,
-    scaleMultiplier: adjustments.scaleMultiplier
+    scale: adjustments.scale
   };
   localStorage.setItem(BOOKMARK_KEY, JSON.stringify(bookmark));
   console.log('🔖 Bookmark saved!', bookmark);
@@ -61,7 +65,7 @@ function loadBookmark(): boolean {
       adjustments.rotationX = bookmark.rotationX;
       adjustments.rotationY = bookmark.rotationY;
       adjustments.rotationZ = bookmark.rotationZ;
-      adjustments.scaleMultiplier = bookmark.scaleMultiplier;
+      adjustments.scale = bookmark.scale;
       console.log('✅ Bookmark loaded!', bookmark);
       return true;
     } catch (e) {
@@ -160,11 +164,16 @@ function initThreeOverlay() {
   threeRenderer.setSize(width, height);
   threeRenderer.setPixelRatio(window.devicePixelRatio);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.8);   // 0.6 → 0.8
+  const ambient = new THREE.AmbientLight(0xffffff, 1.0);  // FULL ambient
   threeScene.add(ambient);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);   // 0.8 → 1.0
-  dir.position.set(0, 1, 2);
-  threeScene.add(dir);
+
+  const dir1 = new THREE.DirectionalLight(0xffffff, 1.5);
+  dir1.position.set(1, 1, 1);
+  threeScene.add(dir1);
+
+  const dir2 = new THREE.DirectionalLight(0xffffff, 1.0);
+  dir2.position.set(-1, 1, 1);
+  threeScene.add(dir2);
 
   console.log('👓 InitThreeOverlay: creating GLTFLoader');
   const loader = new GLTFLoader();
@@ -173,48 +182,99 @@ function initThreeOverlay() {
     'models/glassesbonesfinal.glb',
     (gltf) => {
       console.log('✅ GLB loaded ok');
-
       glassesModel = gltf.scene;
 
       gltf.scene.traverse((child) => {
+        if (child instanceof THREE.SkinnedMesh || (child as any).isMesh) {
+          const mesh = child as THREE.Mesh;
+          
+          // ===== MATERIAL OVERRIDE (NO TRANSPARENCY) =====
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(mat => {
+              if (mat instanceof THREE.MeshStandardMaterial) {
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                mat.color.setHex(0x111111);  // dark frame
+                mat.metalness = 0.1;
+                mat.roughness = 0.3;
+                mat.side = THREE.DoubleSide;
+              }
+            });
+          } else if (mesh.material instanceof THREE.MeshStandardMaterial) {
+            mesh.material.transparent = false;
+            mesh.material.opacity = 1.0;
+            mesh.material.color.setHex(0x111111);
+            mesh.material.metalness = 0.1;
+            mesh.material.roughness = 0.3;
+            mesh.material.side = THREE.DoubleSide;
+          }
+
+          // ===== MESH PROPERTIES =====
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.visible = true;
+        }
+
+        // ===== BONE ACCESS =====
         if (child instanceof THREE.SkinnedMesh) {
           skeleton = child.skeleton;
-
           headBone = skeleton.getBoneByName('Bone');
           leftStemBone = skeleton.getBoneByName('Bone001');
           rightStemBone = skeleton.getBoneByName('Bone005');
         }
-
-        if (child instanceof THREE.SkinnedMesh || (child as any).isMesh) {
-          const mesh = child as THREE.Mesh;
-          const mat = mesh.material as THREE.MeshStandardMaterial;
-
-          mat.color.set(0x000000);        // pure black frame
-          mat.metalness = 0.0;
-          mat.roughness = 0.4;
-          mat.transparent = false;        // force opaque
-          mat.opacity = 1.0;
-          mat.side = THREE.FrontSide;     // ya DoubleSide agar zarurat ho
-
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-        }
       });
 
-      // ✨ Base size/position
-      glassesModel.scale.set(1, 1, 1);
+      // ===== BASE TRANSFORM (CORRECT Z-DIRECTION) =====
+      glassesModel.scale.set(0.0001, 0.0001, 0.0001);  // Extremely small base for large model
       glassesModel.position.set(0, 0, 0);
-      glassesModel.rotation.set(0, 0, 0);
+      glassesModel.rotation.set(0, 0, 0);  // No rotation override
       glassesModel.visible = true;
 
       threeScene?.add(glassesModel);
-      console.log('✅ Rigged glasses model added to scene');
+      console.log('✅ Model loaded with fixed materials + rotation');
     },
     undefined,
-    (error) => {
-      console.error('❌ Loader onError:', error);
-    }
+    (error) => console.error('❌ GLB Error:', error)
   );
+}
+
+// ====================== Face Size Calculator ======================
+function calculateFaceScale(landmarks: any[], canvasWidth: number, canvasHeight: number): number {
+  // Use ACTUAL eye lens width (outer to inner corner) - same as the 2D circles!
+  const leftEyeOuter = landmarks[33];
+  const leftEyeInner = landmarks[133];
+  const rightEyeOuter = landmarks[263];
+  const rightEyeInner = landmarks[362];
+  
+  if (!leftEyeOuter || !leftEyeInner || !rightEyeOuter || !rightEyeInner) return 0.002;
+  
+  // Calculate eye lens width (same calculation as the 2D circles)
+  const leftEyeWidth = Math.hypot(
+    (leftEyeOuter.x - leftEyeInner.x) * canvasWidth,
+    (leftEyeOuter.y - leftEyeInner.y) * canvasHeight
+  );
+  const rightEyeWidth = Math.hypot(
+    (rightEyeOuter.x - rightEyeInner.x) * canvasWidth,
+    (rightEyeOuter.y - rightEyeInner.y) * canvasHeight
+  );
+  
+  // Average eye width (this changes with camera distance, just like the circles!)
+  const avgEyeWidth = (leftEyeWidth + rightEyeWidth) / 2;
+  
+  // Scale proportionally to eye width with a much smaller multiplier
+  const baseScale = 0.00035;  // very small base
+  const scaleFactor = avgEyeWidth * 0.15; // reduced multiplier for proper size
+  
+  return baseScale * scaleFactor;
+}
+
+function adjustGlassesSize(landmarks: any[], canvasWidth: number, canvasHeight: number): number {
+  if (!adjustments.autoSize) {
+    return adjustments.scale; // manual mode
+  }
+  
+  const calculatedScale = calculateFaceScale(landmarks, canvasWidth, canvasHeight);
+  return calculatedScale;
 }
 
 // ====================== Draw 2D + drive 3D ======================
@@ -320,30 +380,30 @@ function drawGlasses(landmarks: any[]): void {
     // Eye centers already computed above:
     // leftCenterX, leftCenterY, rightCenterX, rightCenterY
 
-    // 1) Face center between eyes
-    const faceCenterX = (leftCenterX + rightCenterX) * 0.5;
-    const faceCenterY = (leftCenterY + rightCenterY) * 0.5;
+    // 1) Mount point: Pure NOSE BRIDGE position for accurate tracking
+    let targetX = nx;  // nose bridge X (landmark 168)
+    let targetY = ny;  // nose bridge Y (landmark 168)
 
-    // 2) Target anchor: slightly above eyes (towards eyebrows)
-    let targetX = faceCenterX;
-    let targetY = faceCenterY - eyeDistance * 0.20;
+    // 2) Apply calibration offsets
+    targetX += adjustments.calibratedOffsetX * w;
+    targetY += adjustments.calibratedOffsetY * h;
+    
+    // 3) Apply additional manual adjustments if needed
+    targetX += adjustments.positionX * w;      // Q/W for fine-tuning
+    targetY += adjustments.positionY * h;      // A/S for fine-tuning
 
-    // 3) Apply manual offsets in pixels
-    targetX += adjustments.positionX * w;      // Q/W
-    targetY += adjustments.positionY * h;      // A/S
-
-    // 4) Convert to NDC
+    // 3) Convert to NDC
     const ndcX = (targetX / w) * 2 - 1;
     const ndcY = -(targetY / h) * 2 + 1;
 
-    // 5) Unproject to world (fix depth at -1 in front of camera)
+    // 4) Unproject to world (fix depth at -1 in front of camera)
     const depth = -1;
     const worldPos = new THREE.Vector3(ndcX, ndcY, depth).unproject(threeCamera);
     glassesModel.position.copy(worldPos);
 
-    // 6) Scale from eye distance
-    const s = eyeDistance * adjustments.scaleMultiplier;
-    glassesModel.scale.set(s, s, s);
+    // 5) Auto-size based on face measurements
+    const finalScale = adjustGlassesSize(landmarks, w, h);
+    glassesModel.scale.set(finalScale, finalScale, finalScale);
 
     // 7) Head pose rotation (same as before)
     const leftEarZ = leftEar.z || 0;
@@ -352,11 +412,11 @@ function drawGlasses(landmarks: any[]): void {
     const foreheadZ = foreheadTop.z || 0;
 
     const yawFromEars = (rightEarZ - leftEarZ) * 2;
-    const pitchFromFace = (foreheadZ - noseTipZ) * 3;
+    const pitchFromFace = -(foreheadZ - noseTipZ) * 3;  // inverted for correct pitch
 
     const earDx = rightEarX - leftEarX;
     const earDy = rightEarY - leftEarY;
-    const rollFromEars = Math.atan2(earDy, earDx);
+    const rollFromEars = -Math.atan2(earDy, earDx);  // inverted for correct roll
 
     glassesModel.rotation.order = 'YXZ';
     glassesModel.rotation.y = yawFromEars + adjustments.rotationY;
@@ -404,7 +464,7 @@ function drawGlasses(landmarks: any[]): void {
       ctx.fillText(`pitch: ${pitchFromFace.toFixed(3)}`, 20, y);
       y += lineHeight;
 
-      ctx.fillText(`scale: ${adjustments.scaleMultiplier.toFixed(4)} (P/O)`, 20, y);
+      ctx.fillText(`scale: ${adjustments.scale.toFixed(2)} (P/O)`, 20, y);
       y += lineHeight;
       ctx.fillText(`Press H to hide debug`, 20, y);
       y += lineHeight;
@@ -414,7 +474,6 @@ function drawGlasses(landmarks: any[]): void {
 
   // Render Three.js
   if (threeRenderer && threeScene && threeCamera) {
-    console.log('🎨 Rendering Three.js...'); // add this debug
     threeRenderer.render(threeScene, threeCamera);
   }
 }
@@ -473,8 +532,8 @@ function setupKeyboardControls() {
     if (key === 'I') adjustments.rotationZ += rotStep;
 
     // Scale
-    if (key === 'P') adjustments.scaleMultiplier -= 0.0001;
-    if (key === 'O') adjustments.scaleMultiplier += 0.0001;
+    if (key === 'P') adjustments.scale -= 0.01;
+    if (key === 'O') adjustments.scale += 0.01;
 
     // Debug toggle
     if (key === 'H') adjustments.debugMode = !adjustments.debugMode;
@@ -487,7 +546,7 @@ function setupKeyboardControls() {
       adjustments.rotationX = 0;
       adjustments.rotationY = 0;
       adjustments.rotationZ = 0;
-      adjustments.scaleMultiplier = 0.0015;
+      adjustments.scale = 0.15;
       console.log('🔄 Reset to defaults');
     }
 
