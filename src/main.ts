@@ -181,68 +181,52 @@ function initThreeOverlay() {
   loader.load(
     'models/glassesbonesfinal.glb',
     (gltf) => {
-      console.log('✅ GLB loaded ok');
       glassesModel = gltf.scene;
 
-      // ===== RECURSIVE MATERIAL FIX =====
       gltf.scene.traverse((child) => {
-        // 1) BONE MAPPING (first, before material changes)
         if (child instanceof THREE.SkinnedMesh) {
           skeleton = child.skeleton;
           headBone = skeleton.getBoneByName('Bone');
           leftStemBone = skeleton.getBoneByName('Bone001');
           rightStemBone = skeleton.getBoneByName('Bone005');
-          console.log('🦴 Bones mapped:', { 
-            head: !!headBone, 
-            left: !!leftStemBone, 
-            right: !!rightStemBone 
-          });
         }
 
-        // 2) MESH PROPERTIES
         if ((child as any).isMesh) {
           const mesh = child as THREE.Mesh;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          mesh.frustumCulled = false; // prevent culling issues
-
-          // 3) MATERIAL FIX (CRITICAL)
+          
           if (mesh.material) {
             const materials = Array.isArray(mesh.material) 
               ? mesh.material 
               : [mesh.material];
 
             materials.forEach((mat: any) => {
-              // Kill transparency at source
+              // Kill transparency completely
               mat.transparent = false;
-              mat.alphaTest = 0; // disable alpha testing
+              mat.alphaTest = 0;
               mat.opacity = 1.0;
-              mat.needsUpdate = true; // CRITICAL: force Three.js to recompile material
-
-              // Force solid black frame
-              if (mat.color) mat.color.setHex(0x1a1a1a);
-              if (mat.metalness !== undefined) mat.metalness = 0.05;
-              if (mat.roughness !== undefined) mat.roughness = 0.4;
-
-              console.log(`✅ Material fixed:`, {
-                name: mesh.name,
-                transparent: mat.transparent,
-                opacity: mat.opacity,
-                alphaTest: mat.alphaTest
-              });
+              mat.alphaMap = null;
+              
+              // Opaque black frame
+              mat.color.setHex(0x1a1a1a);
+              mat.metalness = 0.05;
+              mat.roughness = 0.4;
+              
+              // Your script's additions (helpful but not sufficient alone)
+              mat.side = THREE.FrontSide;
+              mat.depthWrite = true;
+              
+              mat.needsUpdate = true;
             });
           }
         }
       });
 
-      // BASE TRANSFORM
       glassesModel.scale.set(0.0001, 0.0001, 0.0001);
       glassesModel.position.set(0, 0, 0);
       glassesModel.rotation.set(0, 0, 0);
       glassesModel.visible = true;
 
       threeScene?.add(glassesModel);
-      console.log('✅ Model loaded + materials opaque');
     },
     undefined,
     (error) => console.error('❌ GLB Error:', error)
