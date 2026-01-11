@@ -2,6 +2,7 @@
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FastRenderer } from './renderer';
 
 // ===== MediaPipe globals =====
 let faceLandmarker: FaceLandmarker | null = null;
@@ -9,7 +10,7 @@ const videoElement = document.createElement('video');
 const canvasElement = document.createElement('canvas');
 
 // ===== Three.js globals =====
-let threeRenderer: THREE.WebGLRenderer | undefined;
+let fastRenderer: FastRenderer | undefined;
 let threeScene: THREE.Scene | undefined;
 let threeCamera: THREE.PerspectiveCamera | undefined;
 let glassesModel: THREE.Object3D | null = null;
@@ -138,16 +139,22 @@ function initThreeOverlay() {
   const width = canvasElement.width;
   const height = canvasElement.height;
 
-  threeScene = new THREE.Scene();
-  threeScene.background = null;
+  // Initialize our custom FastRenderer
+  fastRenderer = new FastRenderer({
+    width,
+    height,
+    alpha: true,
+    antialias: true,
+    pixelRatio: window.devicePixelRatio,
+    sortObjects: true
+  });
 
-  threeCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+  // Get scene and camera from renderer
+  threeScene = fastRenderer.getScene();
+  threeCamera = fastRenderer.getCamera();
+  threeCanvas = fastRenderer.getCanvas();
 
-  // DEBUG: place camera at z = 5 and look at origin
-  threeCamera.position.set(0, 0, 5);
-  threeCamera.lookAt(0, 0, 0);
-
-  threeCanvas = document.createElement('canvas');
+  // Setup canvas styling
   threeCanvas.style.position = 'absolute';
   threeCanvas.style.top = '0';
   threeCanvas.style.left = '0';
@@ -156,24 +163,8 @@ function initThreeOverlay() {
   threeCanvas.style.pointerEvents = 'none';
   root.appendChild(threeCanvas);
 
-  threeRenderer = new THREE.WebGLRenderer({
-    canvas: threeCanvas,
-    alpha: true,
-    antialias: true
-  });
-  threeRenderer.setSize(width, height);
-  threeRenderer.setPixelRatio(window.devicePixelRatio);
-
-  const ambient = new THREE.AmbientLight(0xffffff, 1.0);  // FULL ambient
-  threeScene.add(ambient);
-
-  const dir1 = new THREE.DirectionalLight(0xffffff, 1.5);
-  dir1.position.set(1, 1, 1);
-  threeScene.add(dir1);
-
-  const dir2 = new THREE.DirectionalLight(0xffffff, 1.0);
-  dir2.position.set(-1, 1, 1);
-  threeScene.add(dir2);
+  // Setup optimized lighting
+  fastRenderer.setupLighting();
 
   console.log('👓 InitThreeOverlay: creating GLTFLoader');
   const loader = new GLTFLoader();
@@ -200,20 +191,33 @@ function initThreeOverlay() {
               : [mesh.material];
 
             materials.forEach((mat: any) => {
-              // Kill transparency completely
-              mat.transparent = false;
-              mat.alphaTest = 0;
-              mat.opacity = 1.0;
-              mat.alphaMap = null;
+              // Let the FastRenderer handle material optimization
+              // Just set basic properties here
               
-              // Opaque black frame
-              mat.color.setHex(0x1a1a1a);
-              mat.metalness = 0.05;
-              mat.roughness = 0.4;
-              
-              // Your script's additions (helpful but not sufficient alone)
-              mat.side = THREE.FrontSide;
-              mat.depthWrite = true;
+              // For frame (opaque)
+              if (mat.name.toLowerCase().includes('frame') || 
+                  mat.name.toLowerCase().includes('stem')) {
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                mat.color.setHex(0x1a1a1a);
+                mat.metalness = 0.05;
+                mat.roughness = 0.4;
+              }
+              // For lenses (transparent)
+              else if (mat.name.toLowerCase().includes('lens') || 
+                       mat.name.toLowerCase().includes('glass')) {
+                mat.transparent = true;
+                mat.opacity = 0.15; // Subtle tint
+                mat.color.setHex(0x88ccff); // Light blue tint
+                mat.metalness = 0.9;
+                mat.roughness = 0.1;
+              }
+              // Default to opaque if unsure
+              else {
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                mat.color.setHex(0x1a1a1a);
+              }
               
               mat.needsUpdate = true;
             });
@@ -226,7 +230,10 @@ function initThreeOverlay() {
       glassesModel.rotation.set(0, 0, 0);
       glassesModel.visible = true;
 
-      threeScene?.add(glassesModel);
+      // Use FastRenderer's addObject method for optimized rendering
+      if (fastRenderer && glassesModel) {
+        fastRenderer.addObject(glassesModel);
+      }
     },
     undefined,
     (error) => console.error('❌ GLB Error:', error)
@@ -467,9 +474,9 @@ function drawGlasses(landmarks: any[]): void {
     }
   }
 
-  // Render Three.js
-  if (threeRenderer && threeScene && threeCamera) {
-    threeRenderer.render(threeScene, threeCamera);
+  // Render Three.js with FastRenderer
+  if (fastRenderer) {
+    fastRenderer.render();
   }
 }
 
