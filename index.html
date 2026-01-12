@@ -2,12 +2,109 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>glasses-tryon</title>
+    <title>Glasses Try-On - MindAR</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      .controls {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 1000;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px;
+        border-radius: 8px;
+        font-family: Arial, sans-serif;
+        max-width: 300px;
+      }
+      .control-group {
+        margin-bottom: 10px;
+      }
+      .control-group label {
+        display: block;
+        font-size: 12px;
+        margin-bottom: 3px;
+      }
+      .control-group input[type="range"] {
+        width: 100%;
+      }
+      .control-group button {
+        background: #4CAF50;
+        border: none;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 5px;
+        font-size: 12px;
+      }
+      .control-group button:hover {
+        background: #45a049;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div class="controls">
+      <h3 style="margin-top: 0;">Glasses Adjustment</h3>
+      <div class="control-group">
+        <label>Position X: <span id="posX-val">0</span></label>
+        <input type="range" id="posX" min="-0.5" max="0.5" step="0.01" value="0">
+      </div>
+      <div class="control-group">
+        <label>Position Y: <span id="posY-val">0</span></label>
+        <input type="range" id="posY" min="-0.5" max="0.5" step="0.01" value="0">
+      </div>
+      <div class="control-group">
+        <label>Position Z: <span id="posZ-val">0</span></label>
+        <input type="range" id="posZ" min="-0.5" max="0.5" step="0.01" value="0">
+      </div>
+      <div class="control-group">
+        <label>Scale: <span id="scale-val">0.5</span></label>
+        <input type="range" id="scale" min="0.1" max="1.5" step="0.05" value="0.5">
+      </div>
+      <div class="control-group">
+        <button id="saveBtn">Save Preset</button>
+        <button id="loadBtn">Load Preset</button>
+      </div>
+    </div>
+
+    <a-scene 
+      mindar-face 
+      embedded 
+      color-space="sRGB" 
+      renderer="colorManagement: true, physicallyCorrectLights: true, alpha: true, antialias: true, sortObjects: true" 
+      vr-mode-ui="enabled: false" 
+      device-orientation-permission-ui="enabled: false">
+      
+      <a-assets>
+        <a-asset-item id="glassesModel" src="/models/glassesbonesfinal.glb"></a-asset-item>
+      </a-assets>
+
+      <a-camera active="false" position="0 0 0"></a-camera>
+
+      <!-- Anchor to nose bridge (anchor point 168) -->
+      <a-entity id="glasses-anchor" mindar-face-target="anchorIndex: 168">
+        <a-entity 
+          id="glasses"
+          gltf-model="#glassesModel"
+          position="0 -0.05 -0.15"
+          rotation="0 0 0"
+          scale="0.5 0.5 0.5">
+        </a-entity>
+      </a-entity>
+
+      <!-- Lighting for realistic rendering -->
+      <a-light type="ambient" intensity="0.8"></a-light>
+      <a-light type="directional" position="2 2 3" intensity="1.2"></a-light>
+      <a-light type="directional" position="-2 1 2" intensity="0.6"></a-light>
+    </a-scene>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
