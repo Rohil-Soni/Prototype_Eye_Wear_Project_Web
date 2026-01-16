@@ -1,5 +1,7 @@
-// src/main.ts - MindAR Implementation
+// src/main.ts - MindAR Implementation with Auto-Adjustment
 import './style.css';
+import { FaceMeasurementSystem } from './faceMeasurement';
+import { AutoAdjuster, AdjustmentSettings } from './autoAdjuster';
 
 // ===== Settings Storage =====
 const SETTINGS_KEY = 'mindar-glasses-settings';
@@ -9,15 +11,26 @@ interface GlassesSettings {
   posY: number;
   posZ: number;
   scale: number;
+  rotX: number;
+  rotY: number;
+  rotZ: number;
 }
 
 let glassesEntity: any;
 let currentSettings: GlassesSettings = {
   posX: 0,
-  posY: 0.05,
-  posZ: 0,
-  scale: 0.05
+  posY: 0,
+  posZ: -0.05,
+  scale: 1.2,
+  rotX: 0,
+  rotY: 0,
+  rotZ: 0
 };
+
+// ===== Face Measurement & Auto-Adjustment =====
+const faceMeasurement = new FaceMeasurementSystem();
+const autoAdjuster = new AutoAdjuster(faceMeasurement);
+let mindarSystem: any = null;
 
 // ===== Initialize Controls =====
 function initControls() {
@@ -25,11 +38,17 @@ function initControls() {
   const posYSlider = document.getElementById('posY') as HTMLInputElement;
   const posZSlider = document.getElementById('posZ') as HTMLInputElement;
   const scaleSlider = document.getElementById('scale') as HTMLInputElement;
+  const rotXSlider = document.getElementById('rotX') as HTMLInputElement;
+  const rotYSlider = document.getElementById('rotY') as HTMLInputElement;
+  const rotZSlider = document.getElementById('rotZ') as HTMLInputElement;
   
   const posXVal = document.getElementById('posX-val');
   const posYVal = document.getElementById('posY-val');
   const posZVal = document.getElementById('posZ-val');
   const scaleVal = document.getElementById('scale-val');
+  const rotXVal = document.getElementById('rotX-val');
+  const rotYVal = document.getElementById('rotY-val');
+  const rotZVal = document.getElementById('rotZ-val');
   
   const saveBtn = document.getElementById('saveBtn');
   const loadBtn = document.getElementById('loadBtn');
@@ -44,6 +63,23 @@ function initControls() {
     if (!glassesEntity) {
       console.error('❌ Glasses entity not found');
       return;
+    }
+
+    // Get MindAR system reference
+    const sceneEl = scene as any;
+    if (sceneEl.systems && sceneEl.systems['mindar-face-system']) {
+      mindarSystem = sceneEl.systems['mindar-face-system'];
+      
+      // Initialize face measurement system
+      faceMeasurement.initialize(mindarSystem);
+      faceMeasurement.startTracking();
+      
+      // Start measuring face on interval
+      setInterval(() => {
+        faceMeasurement.measureFace();
+      }, 1000);
+      
+      console.log('✅ Face measurement system active');
     }
 
     // Load saved settings if available
@@ -129,7 +165,31 @@ function initControls() {
   scaleSlider?.addEventListener('input', (e) => {
     const value = parseFloat((e.target as HTMLInputElement).value);
     currentSettings.scale = value;
-    if (scaleVal) scaleVal.textContent = value.toFixed(1);
+    if (scaleVal) scaleVal.textContent = value.toFixed(2);
+    applySettings();
+  });
+
+  // Rotation X control
+  rotXSlider?.addEventListener('input', (e) => {
+    const value = parseFloat((e.target as HTMLInputElement).value);
+    currentSettings.rotX = value;
+    if (rotXVal) rotXVal.textContent = value.toString();
+    applySettings();
+  });
+
+  // Rotation Y control
+  rotYSlider?.addEventListener('input', (e) => {
+    const value = parseFloat((e.target as HTMLInputElement).value);
+    currentSettings.rotY = value;
+    if (rotYVal) rotYVal.textContent = value.toString();
+    applySettings();
+  });
+
+  // Rotation Z control
+  rotZSlider?.addEventListener('input', (e) => {
+    const value = parseFloat((e.target as HTMLInputElement).value);
+    currentSettings.rotZ = value;
+    if (rotZVal) rotZVal.textContent = value.toString();
     applySettings();
   });
 
@@ -151,6 +211,33 @@ function initControls() {
   });
 }
 
+// ===== Auto-Adjustment Functions =====
+function enableAutoAdjust() {
+  autoAdjuster.enable((settings: AdjustmentSettings) => {
+    // Update current settings with auto-adjusted values
+    currentSettings = {
+      ...currentSettings,
+      scale: settings.scale,
+      posX: settings.posX,
+      posY: settings.posY,
+      posZ: settings.posZ
+    };
+    
+    updateUIFromSettings();
+    applySettings();
+  });
+}
+
+function disableAutoAdjust() {
+  autoAdjuster.disable();
+}
+
+// Expose auto-adjustment controls globally
+(window as any).enableAutoAdjust = enableAutoAdjust;
+(window as any).disableAutoAdjust = disableAutoAdjust;
+(window as any).getFaceMeasurements = () => faceMeasurement.getAverageMeasurements();
+(window as any).getRecommendedSettings = () => autoAdjuster.getRecommendedSettings();
+
 // ===== Apply settings to glasses entity =====
 function applySettings() {
   if (!glassesEntity) return;
@@ -166,6 +253,12 @@ function applySettings() {
     y: currentSettings.scale,
     z: currentSettings.scale
   });
+
+  glassesEntity.setAttribute('rotation', {
+    x: currentSettings.rotX,
+    y: currentSettings.rotY,
+    z: currentSettings.rotZ
+  });
 }
 
 // ===== Update UI controls from current settings =====
@@ -174,21 +267,33 @@ function updateUIFromSettings() {
   const posYSlider = document.getElementById('posY') as HTMLInputElement;
   const posZSlider = document.getElementById('posZ') as HTMLInputElement;
   const scaleSlider = document.getElementById('scale') as HTMLInputElement;
+  const rotXSlider = document.getElementById('rotX') as HTMLInputElement;
+  const rotYSlider = document.getElementById('rotY') as HTMLInputElement;
+  const rotZSlider = document.getElementById('rotZ') as HTMLInputElement;
   
   const posXVal = document.getElementById('posX-val');
   const posYVal = document.getElementById('posY-val');
   const posZVal = document.getElementById('posZ-val');
   const scaleVal = document.getElementById('scale-val');
+  const rotXVal = document.getElementById('rotX-val');
+  const rotYVal = document.getElementById('rotY-val');
+  const rotZVal = document.getElementById('rotZ-val');
   
   if (posXSlider) posXSlider.value = currentSettings.posX.toString();
   if (posYSlider) posYSlider.value = currentSettings.posY.toString();
   if (posZSlider) posZSlider.value = currentSettings.posZ.toString();
   if (scaleSlider) scaleSlider.value = currentSettings.scale.toString();
+  if (rotXSlider) rotXSlider.value = currentSettings.rotX.toString();
+  if (rotYSlider) rotYSlider.value = currentSettings.rotY.toString();
+  if (rotZSlider) rotZSlider.value = currentSettings.rotZ.toString();
   
   if (posXVal) posXVal.textContent = currentSettings.posX.toFixed(2);
   if (posYVal) posYVal.textContent = currentSettings.posY.toFixed(2);
   if (posZVal) posZVal.textContent = currentSettings.posZ.toFixed(2);
-  if (scaleVal) scaleVal.textContent = currentSettings.scale.toFixed(1);
+  if (scaleVal) scaleVal.textContent = currentSettings.scale.toFixed(2);
+  if (rotXVal) rotXVal.textContent = currentSettings.rotX.toString();
+  if (rotYVal) rotYVal.textContent = currentSettings.rotY.toString();
+  if (rotZVal) rotZVal.textContent = currentSettings.rotZ.toString();
 }
 
 // ===== Save settings to localStorage =====
@@ -206,7 +311,17 @@ function loadSettings(): boolean {
   try {
     const saved = localStorage.getItem(SETTINGS_KEY);
     if (saved) {
-      currentSettings = JSON.parse(saved);
+      const loaded = JSON.parse(saved);
+      // Merge with defaults to handle missing properties
+      currentSettings = {
+        posX: loaded.posX ?? 0,
+        posY: loaded.posY ?? 0,
+        posZ: loaded.posZ ?? -0.05,
+        scale: loaded.scale ?? 1.2,
+        rotX: loaded.rotX ?? 0,
+        rotY: loaded.rotY ?? 0,
+        rotZ: loaded.rotZ ?? 0
+      };
       console.log('✅ Settings loaded:', currentSettings);
       return true;
     }
@@ -221,5 +336,17 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('🚀 MindAR Glasses Try-On - Initializing...');
   initControls();
 });
+
+// Enable automatic face-based adjustment
+enableAutoAdjust()
+
+// Disable automatic adjustment
+disableAutoAdjust()
+
+// View current face measurements
+getFaceMeasurements()
+
+// Get recommended settings
+getRecommendedSettings()
 
 console.log('📦 main.ts loaded');
