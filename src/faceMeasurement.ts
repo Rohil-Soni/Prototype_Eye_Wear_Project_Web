@@ -30,17 +30,39 @@ export interface LandmarkPoint {
 
 export class FaceMeasurementSystem {
   private measurements: FaceMeasurements[] = [];
-  private mindarSystem: any = null;
   private measurementInterval: number = 1000; // Measure every 1 second
   private lastMeasurementTime: number = 0;
+  private anchorEntity: any = null;
+  private measurementCallback?: (measurement: FaceMeasurements) => void;
 
   /**
    * Initialize the face measurement system
-   * @param mindarSystem - Reference to the MindAR face tracking system
+   * @param anchorEntity - Reference to the MindAR face target entity
    */
-  initialize(mindarSystem: any) {
-    this.mindarSystem = mindarSystem;
+  initialize(anchorEntity: any) {
+    this.anchorEntity = anchorEntity;
+    
+    // Listen for face found/lost events
+    if (this.anchorEntity) {
+      this.anchorEntity.addEventListener('targetFound', () => {
+        console.log('👤 Face detected');
+      });
+      
+      this.anchorEntity.addEventListener('targetLost', () => {
+        console.log('👻 Face lost');
+      });
+    }
+    
     console.log('📏 Face Measurement System initialized');
+  }
+  
+  /**
+   * Register callback for measurement updates
+   * This allows other systems (like autoAdjuster) to react to new measurements
+   */
+  onMeasurementUpdate(callback: (measurement: FaceMeasurements) => void) {
+    this.measurementCallback = callback;
+    console.log('🔗 Measurement callback registered');
   }
 
   /**
@@ -56,7 +78,7 @@ export class FaceMeasurementSystem {
   stopTracking() {
     console.log('⏸️ Face tracking stopped');
   }
-
+  
   /**
    * Calculate distance between two 3D points
    */
@@ -68,16 +90,49 @@ export class FaceMeasurementSystem {
   }
 
   /**
-   * Get landmark position from MindAR
+   * Get landmark position from face anchor's position
+   * Since MindAR tracks the anchor at position 168 (nose bridge),
+   * we use the anchor's world position and estimate other landmarks
+   * based on the anchor's transform
    */
   private getLandmark(index: number): LandmarkPoint | null {
+    if (!this.anchorEntity || !this.anchorEntity.object3D) {
+      return null;
+    }
+
     try {
-      const anchor = this.mindarSystem?.getAnchor(index);
-      if (anchor && anchor.position) {
+      // Get the anchor's world position (nose bridge - landmark 168)
+      const anchorPos = this.anchorEntity.object3D.position;
+      const anchorScale = this.anchorEntity.object3D.scale.x;
+      
+      // For nose bridge (168), return anchor position directly
+      if (index === 168) {
         return {
-          x: anchor.position.x,
-          y: anchor.position.y,
-          z: anchor.position.z
+          x: anchorPos.x,
+          y: anchorPos.y,
+          z: anchorPos.z
+        };
+      }
+      
+      // Estimate other landmarks based on typical face proportions
+      // These are relative to nose bridge position
+      const estimates: { [key: number]: { x: number; y: number; z: number } } = {
+        234: { x: -0.07 * anchorScale, y: 0.02 * anchorScale, z: -0.01 * anchorScale }, // Left temple
+        454: { x: 0.07 * anchorScale, y: 0.02 * anchorScale, z: -0.01 * anchorScale },  // Right temple
+        10: { x: 0, y: 0.08 * anchorScale, z: 0.02 * anchorScale },  // Forehead
+        152: { x: 0, y: -0.08 * anchorScale, z: 0.01 * anchorScale }, // Chin
+        33: { x: -0.04 * anchorScale, y: 0.01 * anchorScale, z: 0.03 * anchorScale },  // Left eye outer
+        263: { x: 0.04 * anchorScale, y: 0.01 * anchorScale, z: 0.03 * anchorScale },  // Right eye outer
+        130: { x: -0.015 * anchorScale, y: 0, z: 0.02 * anchorScale }, // Left eye inner
+        359: { x: 0.015 * anchorScale, y: 0, z: 0.02 * anchorScale }   // Right eye inner
+      };
+      
+      const estimate = estimates[index];
+      if (estimate) {
+        return {
+          x: anchorPos.x + estimate.x,
+          y: anchorPos.y + estimate.y,
+          z: anchorPos.z + estimate.z
         };
       }
     } catch (e) {
@@ -155,6 +210,11 @@ export class FaceMeasurementSystem {
       }
 
       this.lastMeasurementTime = now;
+      
+      // Notify listeners of new measurement
+      if (this.measurementCallback) {
+        this.measurementCallback(measurement);
+      }
 
       console.log('📊 Face measured:', {
         width: faceWidth.toFixed(3),

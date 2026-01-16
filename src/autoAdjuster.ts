@@ -1,7 +1,7 @@
 // src/autoAdjuster.ts - Automatic glasses size adjustment based on face measurements
 
-import type { FaceMeasurements } from './faceMeasurement';
-import { FaceMeasurementSystem } from './faceMeasurement';
+import type { FaceMeasurements } from './faceMeasurement.ts';
+import { FaceMeasurementSystem } from './faceMeasurement.ts';
 
 export interface AdjustmentSettings {
   scale: number;
@@ -31,13 +31,31 @@ export class AutoAdjuster {
   }
 
   /**
+   * Connect to measurement system for real-time updates
+   * This enables automatic adjustments whenever measurements change
+   */
+  connectToMeasurementSystem() {
+    this.measurementSystem.onMeasurementUpdate(() => {
+      // When new measurements arrive and auto-adjust is enabled,
+      // trigger an immediate adjustment update
+      if (this.isAutoAdjustEnabled) {
+        this.updateAdjustments();
+      }
+    });
+    console.log('🔗 AutoAdjuster connected to measurement system');
+  }
+  
+  /**
    * Enable automatic adjustment
    */
   enable(callback: (settings: AdjustmentSettings) => void) {
     this.isAutoAdjustEnabled = true;
     this.adjustmentCallback = callback;
     
-    // Start periodic updates
+    // Connect to measurement system for real-time updates
+    this.connectToMeasurementSystem();
+    
+    // Also keep periodic updates as fallback (every 2 seconds)
     this.intervalId = window.setInterval(() => {
       this.updateAdjustments();
     }, this.updateInterval);

@@ -1,7 +1,7 @@
 // src/main.ts - MindAR Implementation with Auto-Adjustment
 import './style.css';
-import { FaceMeasurementSystem } from './faceMeasurement';
-import { AutoAdjuster, AdjustmentSettings } from './autoAdjuster';
+import { FaceMeasurementSystem } from './faceMeasurement.ts';
+import { AutoAdjuster, type AdjustmentSettings } from './autoAdjuster.ts';
 
 // ===== Settings Storage =====
 const SETTINGS_KEY = 'mindar-glasses-settings';
@@ -21,7 +21,7 @@ let currentSettings: GlassesSettings = {
   posX: 0,
   posY: 0,
   posZ: -0.05,
-  scale: 1.2,
+  scale: 0.5,  // Match HTML default
   rotX: 0,
   rotY: 0,
   rotZ: 0
@@ -30,7 +30,6 @@ let currentSettings: GlassesSettings = {
 // ===== Face Measurement & Auto-Adjustment =====
 const faceMeasurement = new FaceMeasurementSystem();
 const autoAdjuster = new AutoAdjuster(faceMeasurement);
-let mindarSystem: any = null;
 
 // ===== Initialize Controls =====
 function initControls() {
@@ -65,21 +64,24 @@ function initControls() {
       return;
     }
 
-    // Get MindAR system reference
-    const sceneEl = scene as any;
-    if (sceneEl.systems && sceneEl.systems['mindar-face-system']) {
-      mindarSystem = sceneEl.systems['mindar-face-system'];
-      
-      // Initialize face measurement system
-      faceMeasurement.initialize(mindarSystem);
+    // Get MindAR anchor entity reference
+    const glassesAnchor = document.getElementById('glasses-anchor') as any;
+    
+    if (glassesAnchor) {
+      // Initialize face measurement system with anchor entity
+      faceMeasurement.initialize(glassesAnchor);
       faceMeasurement.startTracking();
       
-      // Start measuring face on interval
+      // Start measuring face on interval (when face is detected)
       setInterval(() => {
-        faceMeasurement.measureFace();
+        if (glassesAnchor.object3D && glassesAnchor.object3D.visible) {
+          faceMeasurement.measureFace();
+        }
       }, 1000);
       
       console.log('✅ Face measurement system active');
+    } else {
+      console.error('❌ Glasses anchor not found - face measurement disabled');
     }
 
     // Load saved settings if available
@@ -212,6 +214,28 @@ function initControls() {
 }
 
 // ===== Auto-Adjustment Functions =====
+/**
+ * Initialize automatic adjustment pipeline
+ * Connects measurement system to auto-adjuster for seamless real-time adjustment
+ */
+function initializeAutoAdjustmentPipeline() {
+  autoAdjuster.enable((settings: AdjustmentSettings) => {
+    // Update current settings with auto-adjusted values
+    currentSettings = {
+      ...currentSettings,
+      scale: settings.scale,
+      posX: settings.posX,
+      posY: settings.posY,
+      posZ: settings.posZ
+    };
+    
+    updateUIFromSettings();
+    applySettings();
+  });
+  
+  console.log('🔄 Auto-adjustment pipeline initialized and active');
+}
+
 function enableAutoAdjust() {
   autoAdjuster.enable((settings: AdjustmentSettings) => {
     // Update current settings with auto-adjusted values
@@ -235,6 +259,7 @@ function disableAutoAdjust() {
 // Expose auto-adjustment controls globally
 (window as any).enableAutoAdjust = enableAutoAdjust;
 (window as any).disableAutoAdjust = disableAutoAdjust;
+(window as any).initializeAutoAdjustmentPipeline = initializeAutoAdjustmentPipeline;
 (window as any).getFaceMeasurements = () => faceMeasurement.getAverageMeasurements();
 (window as any).getRecommendedSettings = () => autoAdjuster.getRecommendedSettings();
 
@@ -317,7 +342,7 @@ function loadSettings(): boolean {
         posX: loaded.posX ?? 0,
         posY: loaded.posY ?? 0,
         posZ: loaded.posZ ?? -0.05,
-        scale: loaded.scale ?? 1.2,
+        scale: loaded.scale ?? 0.5,  // Match HTML default
         rotX: loaded.rotX ?? 0,
         rotY: loaded.rotY ?? 0,
         rotZ: loaded.rotZ ?? 0
@@ -335,18 +360,26 @@ function loadSettings(): boolean {
 document.addEventListener('DOMContentLoaded', () => {
   console.log('🚀 MindAR Glasses Try-On - Initializing...');
   initControls();
+  
+  // Initialize automatic adjustment pipeline
+  // Call this after MindAR is ready to enable real-time auto-adjustment
+  // setTimeout(() => initializeAutoAdjustmentPipeline(), 2000);
 });
 
-// Enable automatic face-based adjustment
-enableAutoAdjust()
-
-// Disable automatic adjustment
-disableAutoAdjust()
-
-// View current face measurements
-getFaceMeasurements()
-
-// Get recommended settings
-getRecommendedSettings()
+// Console API Examples:
+// window.enableAutoAdjust() - Manually enable auto-adjustment
+// window.disableAutoAdjust() - Disable auto-adjustment  
+// window.getFaceMeasurements() - Get average face measurements
+// window.getRecommendedSettings() - Get recommended glasses settings
+// window.initializeAutoAdjustmentPipeline() - Auto-initialize on startup
 
 console.log('📦 main.ts loaded');
+
+/**
+ * Browser Console Commands:
+ * 
+ * enableAutoAdjust()         - Enable automatic face-based adjustment
+ * disableAutoAdjust()        - Disable automatic adjustment
+ * getFaceMeasurements()      - View current face measurements
+ * getRecommendedSettings()   - Get recommended settings
+ */
