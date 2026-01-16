@@ -20,6 +20,7 @@ export class AutoAdjuster {
   private adjustmentCallback?: (settings: AdjustmentSettings) => void;
   private updateInterval: number = 2000; // Update every 2 seconds
   private intervalId?: number;
+  private adjustScaleAutomatically: boolean = false; // Control whether scale is auto-adjusted
 
   // Reference measurements (average adult face)
   private readonly REFERENCE_FACE_WIDTH = 0.14; // ~14cm in MindAR units
@@ -79,6 +80,11 @@ export class AutoAdjuster {
    * Calculate optimal glasses scale based on face measurements
    */
   private calculateScale(measurements: FaceMeasurements): number {
+    // Only calculate scale if auto-scale is enabled
+    if (!this.adjustScaleAutomatically) {
+      return this.baseScale; // Return base scale without adjustment
+    }
+    
     // Calculate scale based on face width (primary factor)
     const widthRatio = measurements.faceWidth / this.REFERENCE_FACE_WIDTH;
     
@@ -171,6 +177,23 @@ export class AutoAdjuster {
   setBaseScale(scale: number) {
     this.baseScale = scale;
     console.log('📐 Base scale set to:', scale);
+  }
+
+  /**
+   * Set whether scale should be automatically adjusted
+   * @param enabled - If true, scale will be calculated based on face measurements
+   *                  If false, only position will be adjusted (default: false)
+   */
+  setAutoScaleEnabled(enabled: boolean) {
+    this.adjustScaleAutomatically = enabled;
+    console.log(this.adjustScaleAutomatically ? '🎯 Auto-scale enabled' : '🔒 Auto-scale disabled (position only)');
+  }
+
+  /**
+   * Get whether auto-scale is currently enabled
+   */
+  isAutoScaleEnabled(): boolean {
+    return this.adjustScaleAutomatically;
   }
 
   /**

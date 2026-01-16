@@ -20,8 +20,8 @@ let glassesEntity: any;
 let currentSettings: GlassesSettings = {
   posX: 0,
   posY: 0,
-  posZ: -0.05,
-  scale: 0.5,  // Match HTML default
+  posZ: -0.15,
+  scale: 0.1,  // Match HTML default
   rotX: 0,
   rotY: 0,
   rotZ: 0
@@ -260,6 +260,8 @@ function disableAutoAdjust() {
 (window as any).enableAutoAdjust = enableAutoAdjust;
 (window as any).disableAutoAdjust = disableAutoAdjust;
 (window as any).initializeAutoAdjustmentPipeline = initializeAutoAdjustmentPipeline;
+(window as any).setAutoScaleEnabled = (enabled: boolean) => autoAdjuster.setAutoScaleEnabled(enabled);
+(window as any).isAutoScaleEnabled = () => autoAdjuster.isAutoScaleEnabled();
 (window as any).getFaceMeasurements = () => faceMeasurement.getAverageMeasurements();
 (window as any).getRecommendedSettings = () => autoAdjuster.getRecommendedSettings();
 
@@ -363,12 +365,15 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Initialize automatic adjustment pipeline
   // Call this after MindAR is ready to enable real-time auto-adjustment
-  // setTimeout(() => initializeAutoAdjustmentPipeline(), 2000);
+  setTimeout(() => initializeAutoAdjustmentPipeline(), 2000);
 });
 
 // Console API Examples:
-// window.enableAutoAdjust() - Manually enable auto-adjustment
+// window.enableAutoAdjust() - Manually enable auto-adjustment (position only)
 // window.disableAutoAdjust() - Disable auto-adjustment  
+// window.setAutoScaleEnabled(true) - Enable automatic scale calculation
+// window.setAutoScaleEnabled(false) - Disable (default - position only)
+// window.isAutoScaleEnabled() - Check current status
 // window.getFaceMeasurements() - Get average face measurements
 // window.getRecommendedSettings() - Get recommended glasses settings
 // window.initializeAutoAdjustmentPipeline() - Auto-initialize on startup

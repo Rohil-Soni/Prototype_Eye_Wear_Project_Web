@@ -116,7 +116,7 @@ mat.color.setHex(0x88ccff);
 
 **Glasses not appearing?**
 - Check browser console for model loading errors
-- Verify `/models/glassesbonesfinal.glb` path is correct
+- Verify `/models/glasses.glb` path is correct
 - Ensure camera permissions are granted
 
 **Transparency still wrong?**

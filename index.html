@@ -7,6 +7,25 @@
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
     <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      
+      a-scene {
+        width: 100% !important;
+        height: 100% !important;
+        display: block !important;
+      }
+      
       body {
         margin: 0;
         overflow: hidden;
@@ -65,8 +84,8 @@
         <input type="range" id="posZ" min="-0.5" max="0.5" step="0.01" value="0">
       </div>
       <div class="control-group">
-        <label>Scale: <span id="scale-val">0.5</span></label>
-        <input type="range" id="scale" min="0.1" max="1.5" step="0.05" value="0.5">
+        <label>Scale: <span id="scale-val">0.1</span></label>
+        <input type="range" id="scale" min="0.05" max="1.5" step="0.05" value="0.1">
       </div>
       <div class="control-group">
         <button id="saveBtn">Save Preset</button>
@@ -95,14 +114,15 @@
           gltf-model="#glassesModel"
           position="0 -0.05 -0.15"
           rotation="0 0 0"
-          scale="0.5 0.5 0.5">
+          scale="0.1 0.1 0.1">
         </a-entity>
       </a-entity>
 
       <!-- Lighting for realistic rendering -->
-      <a-light type="ambient" intensity="0.8"></a-light>
-      <a-light type="directional" position="2 2 3" intensity="1.2"></a-light>
-      <a-light type="directional" position="-2 1 2" intensity="0.6"></a-light>
+      <a-light type="ambient" intensity="1.5"></a-light>
+      <a-light type="directional" position="3 3 4" intensity="2.0"></a-light>
+      <a-light type="directional" position="-3 2 3" intensity="1.5"></a-light>
+      <a-light type="point" position="0 0.5 0" intensity="1.2"></a-light>
     </a-scene>
 
     <script type="module" src="/src/main.ts"></script>
