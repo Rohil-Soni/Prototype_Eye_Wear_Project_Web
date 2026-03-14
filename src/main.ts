@@ -1,5 +1,6 @@
 // src/main.ts - MindAR Implementation with Auto-Adjustment
 import './style.css';
+import * as THREE from 'three';
 import { FaceMeasurementSystem } from './faceMeasurement.ts';
 import { AutoAdjuster, type AdjustmentSettings } from './autoAdjuster.ts';
 
@@ -17,15 +18,16 @@ interface GlassesSettings {
 }
 
 let glassesEntity: any;
-let currentSettings: GlassesSettings = {
+const DEFAULT_SETTINGS: GlassesSettings = {
   posX: 0,
   posY: 0,
   posZ: -0.15,
-  scale: 0.1,  // Match HTML default
+  scale: 0.1,
   rotX: 0,
   rotY: 0,
   rotZ: 0
 };
+let currentSettings: GlassesSettings = { ...DEFAULT_SETTINGS };
 
 // ===== Face Measurement & Auto-Adjustment =====
 const faceMeasurement = new FaceMeasurementSystem();
@@ -84,11 +86,11 @@ function initControls() {
       console.error('❌ Glasses anchor not found - face measurement disabled');
     }
 
-    // Load saved settings if available
-    loadSettings();
-    
     // Update UI to reflect current settings
     updateUIFromSettings();
+
+    // Keep auto-adjust base scale synced with active manual scale.
+    autoAdjuster.setBaseScale(currentSettings.scale);
 
     // Apply material settings for proper transparency
     glassesEntity.addEventListener('model-loaded', () => {
@@ -96,14 +98,32 @@ function initControls() {
       const mesh = glassesEntity.getObject3D('mesh');
       
       if (mesh) {
+        // Helps verify whether size issues come from model dimensions.
+        const bbox = new THREE.Box3().setFromObject(mesh);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        console.log('📦 Model bounding size (x,y,z):', size);
+
         mesh.traverse((child: any) => {
           if (child.isMesh && child.material) {
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             
             materials.forEach((mat: any) => {
+              const materialName = (mat?.name || '').toLowerCase();
+              const isFrameLike =
+                materialName.includes('frame') ||
+                materialName.includes('stem') ||
+                materialName.includes('rim') ||
+                materialName.includes('temple');
+              const isLikelyLens =
+                materialName.includes('lens') ||
+                materialName.includes('glass') ||
+                mat.transparent === true ||
+                (typeof mat.opacity === 'number' && mat.opacity < 0.99);
+
               // Frame materials (opaque)
-              if (mat.name.toLowerCase().includes('frame') || 
-                  mat.name.toLowerCase().includes('stem')) {
+              if (isFrameLike) {
+                mat.visible = true;
                 mat.transparent = false;
                 mat.opacity = 1.0;
                 mat.side = 0; // THREE.FrontSide
@@ -113,19 +133,10 @@ function initControls() {
                 mat.metalness = 0.05;
                 mat.roughness = 0.4;
               }
-              // Lens materials (transparent)
-              else if (mat.name.toLowerCase().includes('lens') || 
-                       mat.name.toLowerCase().includes('glass')) {
-                mat.transparent = true;
-                mat.opacity = 0.15; // Subtle transparency
-                mat.side = 2; // THREE.DoubleSide
-                mat.depthWrite = false; // Critical for transparency!
-                mat.depthTest = true;
-                mat.color.setHex(0x88ccff); // Light blue tint
-                mat.metalness = 0.9;
-                mat.roughness = 0.1;
-                // Proper blending
-                mat.blending = 1; // THREE.NormalBlending
+              // Hide likely lens / glass materials.
+              else if (isLikelyLens) {
+                // Hide lens rendering to keep only the frame visible.
+                mat.visible = false;
               }
               
               mat.needsUpdate = true;
@@ -167,6 +178,7 @@ function initControls() {
   scaleSlider?.addEventListener('input', (e) => {
     const value = parseFloat((e.target as HTMLInputElement).value);
     currentSettings.scale = value;
+    autoAdjuster.setBaseScale(value);
     if (scaleVal) scaleVal.textContent = value.toFixed(2);
     applySettings();
   });
@@ -221,9 +233,13 @@ function initControls() {
 function initializeAutoAdjustmentPipeline() {
   autoAdjuster.enable((settings: AdjustmentSettings) => {
     // Update current settings with auto-adjusted values
+    const resolvedScale = autoAdjuster.isAutoScaleEnabled()
+      ? settings.scale
+      : currentSettings.scale;
+
     currentSettings = {
       ...currentSettings,
-      scale: settings.scale,
+      scale: resolvedScale,
       posX: settings.posX,
       posY: settings.posY,
       posZ: settings.posZ
@@ -239,9 +255,13 @@ function initializeAutoAdjustmentPipeline() {
 function enableAutoAdjust() {
   autoAdjuster.enable((settings: AdjustmentSettings) => {
     // Update current settings with auto-adjusted values
+    const resolvedScale = autoAdjuster.isAutoScaleEnabled()
+      ? settings.scale
+      : currentSettings.scale;
+
     currentSettings = {
       ...currentSettings,
-      scale: settings.scale,
+      scale: resolvedScale,
       posX: settings.posX,
       posY: settings.posY,
       posZ: settings.posZ
@@ -341,14 +361,15 @@ function loadSettings(): boolean {
       const loaded = JSON.parse(saved);
       // Merge with defaults to handle missing properties
       currentSettings = {
-        posX: loaded.posX ?? 0,
-        posY: loaded.posY ?? 0,
-        posZ: loaded.posZ ?? -0.05,
-        scale: loaded.scale ?? 0.5,  // Match HTML default
-        rotX: loaded.rotX ?? 0,
-        rotY: loaded.rotY ?? 0,
-        rotZ: loaded.rotZ ?? 0
+        posX: loaded.posX ?? DEFAULT_SETTINGS.posX,
+        posY: loaded.posY ?? DEFAULT_SETTINGS.posY,
+        posZ: loaded.posZ ?? DEFAULT_SETTINGS.posZ,
+        scale: loaded.scale ?? DEFAULT_SETTINGS.scale,
+        rotX: loaded.rotX ?? DEFAULT_SETTINGS.rotX,
+        rotY: loaded.rotY ?? DEFAULT_SETTINGS.rotY,
+        rotZ: loaded.rotZ ?? DEFAULT_SETTINGS.rotZ
       };
+      autoAdjuster.setBaseScale(currentSettings.scale);
       console.log('✅ Settings loaded:', currentSettings);
       return true;
     }
@@ -361,6 +382,8 @@ function loadSettings(): boolean {
 // ===== Initialize application =====
 document.addEventListener('DOMContentLoaded', () => {
   console.log('🚀 MindAR Glasses Try-On - Initializing...');
+  // Force deterministic defaults on startup for easier fit debugging.
+  currentSettings = { ...DEFAULT_SETTINGS };
   initControls();
   
   // Initialize automatic adjustment pipeline
