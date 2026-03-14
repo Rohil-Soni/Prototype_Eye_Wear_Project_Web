@@ -7,89 +7,207 @@
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
     <style>
+      :root {
+        --panel-bg: rgba(10, 16, 26, 0.86);
+        --panel-border: rgba(146, 170, 196, 0.28);
+        --text-main: #f0f5fa;
+        --text-muted: #abc0d7;
+        --accent: #4db6ff;
+        --success: #31b57a;
+        --warn: #ff9f43;
+      }
+
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
-      
-      html, body {
+
+      html,
+      body {
         width: 100%;
         height: 100%;
-        margin: 0;
         overflow: hidden;
       }
-      
+
+      body {
+        font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      }
+
       a-scene {
         width: 100% !important;
         height: 100% !important;
         display: block !important;
       }
-      
-      body {
-        margin: 0;
-        overflow: hidden;
-      }
+
       .controls {
         position: fixed;
-        top: 10px;
-        left: 10px;
+        top: 12px;
+        left: 12px;
         z-index: 1000;
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 15px;
-        border-radius: 8px;
-        font-family: Arial, sans-serif;
-        max-width: 300px;
+        width: min(340px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        color: var(--text-main);
+        background: linear-gradient(160deg, var(--panel-bg), rgba(18, 30, 49, 0.78));
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 14px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 14px 28px rgba(0, 0, 0, 0.32);
       }
-      .control-group {
+
+      .panel-title {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
         margin-bottom: 10px;
       }
+
+      .section {
+        margin-bottom: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(173, 197, 224, 0.2);
+        border-radius: 10px;
+        padding: 10px;
+      }
+
+      .section-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 8px;
+      }
+
+      .control-group {
+        margin-bottom: 9px;
+      }
+
+      .control-group:last-child {
+        margin-bottom: 0;
+      }
+
       .control-group label {
         display: block;
         font-size: 12px;
-        margin-bottom: 3px;
+        margin-bottom: 4px;
       }
+
       .control-group input[type="range"] {
         width: 100%;
+        accent-color: var(--accent);
       }
-      .control-group button {
-        background: #4CAF50;
+
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      button {
         border: none;
-        color: white;
-        padding: 8px 12px;
-        border-radius: 4px;
+        color: #fff;
+        padding: 8px 10px;
+        border-radius: 8px;
         cursor: pointer;
-        margin-right: 5px;
         font-size: 12px;
+        font-weight: 600;
+        transition: transform 0.12s ease, filter 0.2s ease;
       }
-      .control-group button:hover {
-        background: #45a049;
+
+      button:hover {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn-green { background: var(--success); }
+      .btn-blue { background: #257ed8; }
+      .btn-orange { background: var(--warn); }
+      .btn-teal { background: #00897b; }
+      .btn-brown { background: #6d4c41; }
+
+      .status {
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .hint {
+        margin-top: 6px;
+        font-size: 10px;
+        color: var(--text-muted);
+        line-height: 1.35;
+      }
+
+      @media (max-width: 640px) {
+        .controls {
+          top: 8px;
+          left: 8px;
+          width: calc(100vw - 16px);
+          max-height: 48vh;
+        }
+
+        .panel-title {
+          font-size: 20px;
+        }
       }
     </style>
   </head>
   <body>
     <div class="controls">
-      <h3 style="margin-top: 0;">Glasses Adjustment</h3>
-      <div class="control-group">
-        <label>Position X: <span id="posX-val">0</span></label>
-        <input type="range" id="posX" min="-0.5" max="0.5" step="0.01" value="0">
+      <h3 class="panel-title">Glasses Fit</h3>
+
+      <div class="section">
+        <div class="section-title">Size</div>
+        <div class="control-group">
+          <label>Frame Size (pt): <span id="size-points-val">100</span></label>
+          <input type="range" id="sizePointsRange" min="40" max="220" step="1" value="100">
+        </div>
+        <div class="control-group">
+          <label for="sizePointsInput">Type Size (pt)</label>
+          <input
+            type="number"
+            id="sizePointsInput"
+            min="40"
+            max="220"
+            step="1"
+            value="100"
+            style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(173, 197, 224, 0.35); background: rgba(10,16,26,0.65); color: #f0f5fa;"
+          >
+        </div>
       </div>
-      <div class="control-group">
-        <label>Position Y: <span id="posY-val">0</span></label>
-        <input type="range" id="posY" min="-0.5" max="0.5" step="0.01" value="0">
+
+      <div class="section">
+        <div class="section-title">Projection Calibration</div>
+        <div class="button-row">
+          <button id="startCalibrationBtn" class="btn-orange">Start Position</button>
+          <button id="saveCalibrationBtn" class="btn-teal" disabled>Save Position</button>
+        </div>
+        <div class="button-row" style="margin-top: 8px;">
+          <button id="startScaleCalibrationBtn" class="btn-orange">Start Size</button>
+          <button id="saveScaleCalibrationBtn" class="btn-teal" disabled>Save Size</button>
+        </div>
+        <div class="button-row" style="margin-top: 8px;">
+          <button id="resetCalibrationBtn" class="btn-brown" style="grid-column: 1 / -1;">Reset All</button>
+        </div>
+        <div id="calibrationStatus" class="status">Position: OFF | Size: OFF | posOffset=(0.000, 0.000, 0.000) | scaleFactor=1.000</div>
+        <div class="hint">Position mode: drag to align, wheel for depth. Size mode: drag up/down to resize. Save when aligned.</div>
       </div>
-      <div class="control-group">
-        <label>Position Z: <span id="posZ-val">-0.15</span></label>
-        <input type="range" id="posZ" min="-0.5" max="0.5" step="0.01" value="-0.15">
-      </div>
-      <div class="control-group">
-        <label>Scale: <span id="scale-val">0.1</span></label>
-        <input type="range" id="scale" min="0.05" max="1.5" step="0.05" value="0.1">
-      </div>
-      <div class="control-group">
-        <button id="saveBtn">Save Preset</button>
-        <button id="loadBtn">Load Preset</button>
+
+      <div class="section">
+        <div class="section-title">Preset</div>
+        <div class="button-row">
+          <button id="saveBtn" class="btn-green">Save Preset</button>
+          <button id="loadBtn" class="btn-blue">Load Preset</button>
+        </div>
       </div>
     </div>
 
@@ -109,6 +227,16 @@
 
       <!-- Anchor to nose bridge (anchor point 168) -->
       <a-entity id="glasses-anchor" mindar-face-target="anchorIndex: 168">
+        <!-- Inspector-only debug marker (hidden by default) -->
+        <a-sphere
+          id="anchor-marker"
+          position="0 0 0"
+          radius="0.004"
+          color="#00ff66"
+          visible="false"
+          material="shader: flat; transparent: true; opacity: 0.95">
+        </a-sphere>
+
         <a-entity 
           id="glasses"
           gltf-model="#glassesModel"
@@ -117,6 +245,9 @@
           scale="0.1 0.1 0.1">
         </a-entity>
       </a-entity>
+
+      <!-- Generated by main.ts: inspector-only debug points (hidden by default) -->
+      <a-entity id="anchor-debug-pool" visible="false"></a-entity>
 
       <!-- Lighting for realistic rendering -->
       <a-light type="ambient" intensity="1.5"></a-light>
