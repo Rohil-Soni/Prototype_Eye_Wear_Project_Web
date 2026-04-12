@@ -166,48 +166,9 @@
       <h3 class="panel-title">Glasses Fit</h3>
 
       <div class="section">
-        <div class="section-title">Size</div>
-        <div class="control-group">
-          <label>Frame Size (pt): <span id="size-points-val">100</span></label>
-          <input type="range" id="sizePointsRange" min="40" max="220" step="1" value="100">
-        </div>
-        <div class="control-group">
-          <label for="sizePointsInput">Type Size (pt)</label>
-          <input
-            type="number"
-            id="sizePointsInput"
-            min="40"
-            max="220"
-            step="1"
-            value="100"
-            style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(173, 197, 224, 0.35); background: rgba(10,16,26,0.65); color: #f0f5fa;"
-          >
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">Projection Calibration</div>
-        <div class="button-row">
-          <button id="startCalibrationBtn" class="btn-orange">Start Position</button>
-          <button id="saveCalibrationBtn" class="btn-teal" disabled>Save Position</button>
-        </div>
-        <div class="button-row" style="margin-top: 8px;">
-          <button id="startScaleCalibrationBtn" class="btn-orange">Start Size</button>
-          <button id="saveScaleCalibrationBtn" class="btn-teal" disabled>Save Size</button>
-        </div>
-        <div class="button-row" style="margin-top: 8px;">
-          <button id="resetCalibrationBtn" class="btn-brown" style="grid-column: 1 / -1;">Reset All</button>
-        </div>
-        <div id="calibrationStatus" class="status">Position: OFF | Size: OFF | posOffset=(0.000, 0.000, 0.000) | scaleFactor=1.000</div>
-        <div class="hint">Position mode: drag to align, wheel for depth. Size mode: drag up/down to resize. Save when aligned.</div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">Preset</div>
-        <div class="button-row">
-          <button id="saveBtn" class="btn-green">Save Preset</button>
-          <button id="loadBtn" class="btn-blue">Load Preset</button>
-        </div>
+        <div class="section-title">Auto Tracking</div>
+        <div class="status">Manual controls and presets are disabled. Fit follows live face tracking.</div>
+        <div class="hint">Use console: enableTrackingDebug() / getTrackingDebugState()</div>
       </div>
     </div>
 

@@ -7,8 +7,10 @@ import { AutoAdjuster, type AdjustmentSettings } from './autoAdjuster.ts';
 // ===== Settings Storage =====
 const SETTINGS_KEY = 'mindar-glasses-settings';
 const CALIBRATION_KEY_PREFIX = 'mindar-projection-calibration';
+const TRACKING_DEBUG_KEY = 'mindar-tracking-debug';
 const SIZE_POINTS_MIN = 40;
 const SIZE_POINTS_MAX = 220;
+const AUGMENTATION_Y_OFFSET = -1.45;
 
 interface PositionOffset {
   x: number;
@@ -32,6 +34,25 @@ interface GlassesSettings {
 }
 
 let glassesEntity: any;
+let trackingDebugPanel: HTMLPreElement | null = null;
+let trackingDebugEnabled = false;
+let glassesAnchorEntity: any = null;
+let baselineAnchorScale = 1;
+let smoothedAnchorScale = 1;
+let headYawDeg = 0;
+let headPitchDeg = 0;
+let yawSign = 1;
+let trackingOffsetX = 0;
+let trackingOffsetY = 0;
+let trackingOffsetZ = 0;
+let trackingConfidence = 0;
+let trackingVisibleCount = 0;
+let trackingAnchorEntities = new Map<number, any>();
+let rightSideParts: THREE.Object3D[] = [];
+let leftSideParts: THREE.Object3D[] = [];
+let rightNoseParts: THREE.Object3D[] = [];
+let leftNoseParts: THREE.Object3D[] = [];
+let farSideFade = 1;
 const DEFAULT_SETTINGS: GlassesSettings = {
   posX: 0,
   posY: 0,
@@ -117,6 +138,224 @@ function sizePointsToScale(points: number): number {
   return 0.05 + t * (1.5 - 0.05);
 }
 
+function loadTrackingDebugEnabled(): boolean {
+  try {
+    return localStorage.getItem(TRACKING_DEBUG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveTrackingDebugEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(TRACKING_DEBUG_KEY, enabled ? '1' : '0');
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function setTrackingDebugEnabled(enabled: boolean) {
+  trackingDebugEnabled = enabled;
+  faceMeasurement.setDebugEnabled(enabled);
+  saveTrackingDebugEnabled(enabled);
+
+  if (trackingDebugPanel) {
+    trackingDebugPanel.style.display = enabled ? 'block' : 'none';
+  }
+
+  console.log(`🧪 Tracking debug ${enabled ? 'enabled' : 'disabled'}`);
+  updateTrackingDebugPanel();
+}
+
+function updateTrackingDebugPanel() {
+  if (!trackingDebugPanel || !trackingDebugEnabled) return;
+
+  const debugState = faceMeasurement.getTrackingDebugState();
+  const latest = debugState.latest;
+  const appliedPosition = {
+    x: currentSettings.posX + calibrationProfile.positionOffset.x,
+    y: currentSettings.posY + calibrationProfile.positionOffset.y + AUGMENTATION_Y_OFFSET,
+    z: currentSettings.posZ + calibrationProfile.positionOffset.z,
+  };
+  const appliedScale = currentSettings.scale * calibrationProfile.scaleFactor;
+  const lockedScale = autoAdjuster.getLockedScale();
+
+  trackingDebugPanel.textContent = [
+    `Anchor visible: ${debugState.anchorVisible ? 'yes' : 'no'}`,
+    `Anchor pos: (${debugState.anchorPosition.x.toFixed(3)}, ${debugState.anchorPosition.y.toFixed(3)}, ${debugState.anchorPosition.z.toFixed(3)})`,
+    `Anchor scale: (${debugState.anchorScale.x.toFixed(3)}, ${debugState.anchorScale.y.toFixed(3)}, ${debugState.anchorScale.z.toFixed(3)})`,
+    `Head pose: yaw=${headYawDeg.toFixed(1)} pitch=${headPitchDeg.toFixed(1)} sign=${yawSign}`,
+    `Stabilization: baseline=${baselineAnchorScale.toFixed(3)} smooth=${smoothedAnchorScale.toFixed(3)} fade=${farSideFade.toFixed(2)}`,
+    `Tracking offset: (${trackingOffsetX.toFixed(3)}, ${trackingOffsetY.toFixed(3)}, ${trackingOffsetZ.toFixed(3)}) confidence=${trackingConfidence.toFixed(2)} visible=${trackingVisibleCount}`,
+    `Measurements stored: ${debugState.measurementCount}`,
+    latest
+      ? `Latest faceWidth=${latest.faceWidth.toFixed(3)} eyeDistance=${latest.eyeDistance.toFixed(3)} noseWidth=${latest.noseWidth.toFixed(3)} conf=${(latest.confidence * 100).toFixed(0)}%`
+      : 'Latest measurement: none',
+    `Current settings: pos=(${currentSettings.posX.toFixed(3)}, ${currentSettings.posY.toFixed(3)}, ${currentSettings.posZ.toFixed(3)}) scale=${currentSettings.scale.toFixed(3)}`,
+    `Applied transform: pos=(${appliedPosition.x.toFixed(3)}, ${appliedPosition.y.toFixed(3)}, ${appliedPosition.z.toFixed(3)}) scale=${appliedScale.toFixed(3)}`,
+    `Auto-scale lock: ${lockedScale === null ? 'none' : lockedScale.toFixed(3)}`,
+    `Calibration offset: (${calibrationProfile.positionOffset.x.toFixed(3)}, ${calibrationProfile.positionOffset.y.toFixed(3)}, ${calibrationProfile.positionOffset.z.toFixed(3)})`
+  ].join('\n');
+}
+
+function smoothStep(edge0: number, edge1: number, x: number): number {
+  const t = clampNumber((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function detectNamedParts(root: THREE.Object3D) {
+  rightSideParts = [];
+  leftSideParts = [];
+  rightNoseParts = [];
+  leftNoseParts = [];
+
+  root.traverse((child: any) => {
+    if (!child?.isMesh || !child?.name) return;
+    const name = String(child.name).toLowerCase();
+
+    const isRight = /(_r|\.r|right|-r$|\br\b)/.test(name);
+    const isLeft = /(_l|\.l|left|-l$|\bl\b)/.test(name);
+    const isTemple = /temple|stem|arm|side/.test(name);
+    const isNose = /nose|pad|bevel|bridge/.test(name);
+
+    if (isTemple && isRight) rightSideParts.push(child);
+    if (isTemple && isLeft) leftSideParts.push(child);
+    if (isNose && isRight) rightNoseParts.push(child);
+    if (isNose && isLeft) leftNoseParts.push(child);
+  });
+
+  console.log('🧩 Dynamic occlusion parts:', {
+    rightSide: rightSideParts.length,
+    leftSide: leftSideParts.length,
+    rightNose: rightNoseParts.length,
+    leftNose: leftNoseParts.length,
+  });
+
+  if (rightSideParts.length + leftSideParts.length + rightNoseParts.length + leftNoseParts.length === 0) {
+    console.warn('⚠️ No named side/nose sub-parts found. Occlusion fade is disabled until split meshes are provided.');
+  }
+}
+
+function setPartOpacity(parts: THREE.Object3D[], opacity: number) {
+  const targetOpacity = clampNumber(opacity, 0.02, 1);
+
+  for (const part of parts) {
+    const mesh = part as any;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+
+    for (const mat of mats) {
+      if (!mat) continue;
+      mat.transparent = true;
+      mat.opacity = targetOpacity;
+      mat.depthWrite = targetOpacity > 0.5;
+      mat.visible = targetOpacity > 0.03;
+      mat.needsUpdate = true;
+    }
+  }
+}
+
+function updatePoseTrackingAndOcclusion() {
+  const anchorObj = glassesAnchorEntity?.object3D;
+  if (!anchorObj) return;
+
+  anchorObj.updateMatrixWorld(true);
+
+  const q = new THREE.Quaternion();
+  anchorObj.getWorldQuaternion(q);
+  const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+
+  headYawDeg = THREE.MathUtils.radToDeg(e.y) * yawSign;
+  headPitchDeg = THREE.MathUtils.radToDeg(e.x);
+
+  const anchorScale = anchorObj.scale?.x ?? 1;
+  smoothedAnchorScale = THREE.MathUtils.lerp(smoothedAnchorScale, anchorScale, 0.18);
+
+  const rightHide = smoothStep(10, 28, headYawDeg);
+  const leftHide = smoothStep(-10, -28, headYawDeg);
+
+  const rightAlpha = 1 - rightHide * 0.96;
+  const leftAlpha = 1 - leftHide * 0.96;
+  const rightNoseAlpha = 1 - rightHide * 0.8;
+  const leftNoseAlpha = 1 - leftHide * 0.8;
+
+  setPartOpacity(rightSideParts, rightAlpha);
+  setPartOpacity(leftSideParts, leftAlpha);
+  setPartOpacity(rightNoseParts, rightNoseAlpha);
+  setPartOpacity(leftNoseParts, leftNoseAlpha);
+
+  farSideFade = Math.min(rightAlpha, leftAlpha);
+}
+
+function getAnchorWorldPosition(index: number): THREE.Vector3 | null {
+  const entity = trackingAnchorEntities.get(index);
+  const obj = entity?.object3D;
+  if (!obj || !obj.visible) return null;
+
+  obj.updateMatrixWorld(true);
+  const position = new THREE.Vector3();
+  obj.getWorldPosition(position);
+  return position;
+}
+
+function weightedAverage(points: Array<{ point: THREE.Vector3; weight: number }>): THREE.Vector3 | null {
+  let totalWeight = 0;
+  const sum = new THREE.Vector3();
+
+  for (const item of points) {
+    if (item.weight <= 0) continue;
+    sum.addScaledVector(item.point, item.weight);
+    totalWeight += item.weight;
+  }
+
+  if (totalWeight <= 0) return null;
+  return sum.multiplyScalar(1 / totalWeight);
+}
+
+function updateStabilizedTrackingOffset() {
+  const nose = getAnchorWorldPosition(168);
+  if (!nose) return;
+
+  const leftTemple = getAnchorWorldPosition(234);
+  const rightTemple = getAnchorWorldPosition(454);
+  const leftEyeOuter = getAnchorWorldPosition(33);
+  const rightEyeOuter = getAnchorWorldPosition(263);
+  const leftEyeInner = getAnchorWorldPosition(130);
+  const rightEyeInner = getAnchorWorldPosition(359);
+  const forehead = getAnchorWorldPosition(10);
+  const chin = getAnchorWorldPosition(152);
+
+  const candidates: Array<{ point: THREE.Vector3; weight: number }> = [{ point: nose, weight: 0.12 }];
+
+  const pairCenter = (a: THREE.Vector3 | null, b: THREE.Vector3 | null, weight: number) => {
+    if (a && b) {
+      candidates.push({ point: a.clone().add(b).multiplyScalar(0.5), weight });
+    } else if (a) {
+      candidates.push({ point: a, weight: weight * 0.55 });
+    } else if (b) {
+      candidates.push({ point: b, weight: weight * 0.55 });
+    }
+  };
+
+  pairCenter(leftTemple, rightTemple, 0.32);
+  pairCenter(leftEyeOuter, rightEyeOuter, 0.2);
+  pairCenter(leftEyeInner, rightEyeInner, 0.16);
+  pairCenter(forehead, chin, 0.1);
+
+  const faceCenter = weightedAverage(candidates);
+  if (!faceCenter) return;
+
+  const offset = faceCenter.clone().sub(nose);
+  const visiblePoints = [nose, leftTemple, rightTemple, leftEyeOuter, rightEyeOuter, leftEyeInner, rightEyeInner, forehead, chin].filter(Boolean).length;
+  const confidence = clampNumber(visiblePoints / 9, 0.1, 1);
+
+  const smoothing = 0.08 + confidence * 0.22;
+  trackingOffsetX = THREE.MathUtils.lerp(trackingOffsetX, offset.x, smoothing);
+  trackingOffsetY = THREE.MathUtils.lerp(trackingOffsetY, offset.y, smoothing);
+  trackingOffsetZ = THREE.MathUtils.lerp(trackingOffsetZ, offset.z, smoothing);
+  trackingConfidence = confidence;
+  trackingVisibleCount = visiblePoints;
+}
+
 // ===== Initialize Controls =====
 function initControls() {
   const posXSlider = document.getElementById('posX') as HTMLInputElement;
@@ -163,6 +402,7 @@ function initControls() {
   let lastPointerY = 0;
 
   calibrationProfile = loadCalibrationProfile();
+  trackingDebugEnabled = loadTrackingDebugEnabled();
 
   const anchorAliases = DEBUG_ANCHOR_POINTS.map((index, i) => ({
     alias: `a${i + 1}`,
@@ -197,6 +437,7 @@ function initControls() {
   const buildAnchorDebugPoints = () => {
     if (!anchorDebugPool) return;
     anchorDebugPool.innerHTML = '';
+    trackingAnchorEntities = new Map<number, any>();
 
     anchorAliases.forEach((item) => {
       const targetEntity = document.createElement('a-entity');
@@ -219,7 +460,29 @@ function initControls() {
       targetEntity.appendChild(marker);
       targetEntity.appendChild(label);
       anchorDebugPool.appendChild(targetEntity);
+      trackingAnchorEntities.set(item.index, targetEntity);
     });
+  };
+
+  const buildTrackingDebugPanel = () => {
+    const controls = document.querySelector('.controls');
+    if (!controls) return;
+
+    const panel = document.createElement('pre');
+    panel.id = 'tracking-debug-panel';
+    panel.style.marginTop = '12px';
+    panel.style.padding = '10px';
+    panel.style.borderRadius = '10px';
+    panel.style.border = '1px solid rgba(173, 197, 224, 0.22)';
+    panel.style.background = 'rgba(0, 0, 0, 0.28)';
+    panel.style.color = '#dbe9f8';
+    panel.style.fontSize = '11px';
+    panel.style.lineHeight = '1.35';
+    panel.style.whiteSpace = 'pre-wrap';
+    panel.style.display = trackingDebugEnabled ? 'block' : 'none';
+    panel.textContent = 'Tracking debug disabled';
+    trackingDebugPanel = panel;
+    controls.appendChild(panel);
   };
 
   const startPositionCalibration = () => {
@@ -413,6 +676,7 @@ function initControls() {
   });
 
   buildAnchorDebugPoints();
+  buildTrackingDebugPanel();
   setDebugVisibility(false);
   if (saveCalibrationBtn) saveCalibrationBtn.disabled = true;
   if (saveScaleCalibrationBtn) saveScaleCalibrationBtn.disabled = true;
@@ -534,10 +798,13 @@ function initControls() {
 
     // Get MindAR anchor entity reference
     const glassesAnchorRef = document.getElementById('glasses-anchor') as any;
+    glassesAnchorEntity = glassesAnchorRef;
 
     if (glassesAnchorRef) {
       // Initialize face measurement system with anchor entity
       faceMeasurement.initialize(glassesAnchorRef);
+      faceMeasurement.onMeasurementUpdate(() => updateTrackingDebugPanel());
+      faceMeasurement.setDebugEnabled(trackingDebugEnabled);
       faceMeasurement.startTracking();
       
       // Start measuring face on interval (when face is detected)
@@ -545,7 +812,25 @@ function initControls() {
         if (glassesAnchorRef.object3D && glassesAnchorRef.object3D.visible) {
           faceMeasurement.measureFace();
         }
-      }, 1000);
+      }, 120);
+
+      glassesAnchorRef.addEventListener('targetFound', () => {
+        const initialScale = glassesAnchorRef.object3D?.scale?.x ?? 1;
+        baselineAnchorScale = initialScale;
+        smoothedAnchorScale = initialScale;
+      });
+
+      glassesAnchorRef.addEventListener('targetLost', () => {
+        rightSideParts = [];
+        leftSideParts = [];
+        rightNoseParts = [];
+        leftNoseParts = [];
+      });
+
+      // Keep pose-derived occlusion and scale stabilization responsive.
+      setInterval(() => {
+        updatePoseTrackingAndOcclusion();
+      }, 33);
       
       console.log('✅ Face measurement system active');
     } else {
@@ -555,6 +840,7 @@ function initControls() {
     // Update UI to reflect current settings
     updateUIFromSettings();
     syncSizeControlsFromScale();
+    updateTrackingDebugPanel();
 
     // Keep auto-adjust base scale synced with active manual scale.
     autoAdjuster.setBaseScale(currentSettings.scale);
@@ -610,6 +896,8 @@ function initControls() {
             });
           }
         });
+
+        detectNamedParts(mesh);
         
         console.log('✅ Materials configured for transparency');
         applySettings();
@@ -707,6 +995,7 @@ function initControls() {
     if (loadSettings()) {
       updateUIFromSettings();
       applySettings();
+      updateTrackingDebugPanel();
       alert('✅ Settings loaded!');
     } else {
       alert('❌ No saved settings found');
@@ -729,13 +1018,11 @@ function initializeAutoAdjustmentPipeline() {
     currentSettings = {
       ...currentSettings,
       scale: resolvedScale,
-      posX: settings.posX,
-      posY: settings.posY,
-      posZ: settings.posZ
     };
     
     updateUIFromSettings();
     applySettings();
+    updateTrackingDebugPanel();
   });
   
   console.log('🔄 Auto-adjustment pipeline initialized and active');
@@ -751,13 +1038,11 @@ function enableAutoAdjust() {
     currentSettings = {
       ...currentSettings,
       scale: resolvedScale,
-      posX: settings.posX,
-      posY: settings.posY,
-      posZ: settings.posZ
     };
     
     updateUIFromSettings();
     applySettings();
+    updateTrackingDebugPanel();
   });
 }
 
@@ -773,18 +1058,39 @@ function disableAutoAdjust() {
 (window as any).isAutoScaleEnabled = () => autoAdjuster.isAutoScaleEnabled();
 (window as any).getFaceMeasurements = () => faceMeasurement.getAverageMeasurements();
 (window as any).getRecommendedSettings = () => autoAdjuster.getRecommendedSettings();
+(window as any).getTrackingDebugState = () => faceMeasurement.getTrackingDebugState();
+(window as any).enableTrackingDebug = () => setTrackingDebugEnabled(true);
+(window as any).disableTrackingDebug = () => setTrackingDebugEnabled(false);
+(window as any).isTrackingDebugEnabled = () => trackingDebugEnabled;
+(window as any).setYawSign = (sign: number) => {
+  yawSign = sign >= 0 ? 1 : -1;
+  return yawSign;
+};
+(window as any).getHeadPose = () => ({ yaw: headYawDeg, pitch: headPitchDeg, yawSign });
+(window as any).resetAutoScaleLock = () => autoAdjuster.resetScaleLock();
+(window as any).resetTrackingOffset = () => {
+  trackingOffsetX = 0;
+  trackingOffsetY = 0;
+  trackingOffsetZ = 0;
+  trackingConfidence = 0;
+  trackingVisibleCount = 0;
+};
 
 // ===== Apply settings to glasses entity =====
 function applySettings() {
   if (!glassesEntity) return;
+
+  updatePoseTrackingAndOcclusion();
+  updateStabilizedTrackingOffset();
   
   glassesEntity.setAttribute('position', {
     x: currentSettings.posX + calibrationProfile.positionOffset.x,
-    y: currentSettings.posY + calibrationProfile.positionOffset.y,
+    y: currentSettings.posY + calibrationProfile.positionOffset.y + AUGMENTATION_Y_OFFSET,
     z: currentSettings.posZ + calibrationProfile.positionOffset.z
   });
   
   const calibratedScale = currentSettings.scale * calibrationProfile.scaleFactor;
+
   glassesEntity.setAttribute('scale', {
     x: calibratedScale,
     y: calibratedScale,
@@ -796,6 +1102,23 @@ function applySettings() {
     y: currentSettings.rotY,
     z: currentSettings.rotZ
   });
+
+  if (trackingDebugEnabled) {
+    console.log('🧪 Applied augmentation transform:', {
+      position: {
+        x: currentSettings.posX + calibrationProfile.positionOffset.x,
+        y: currentSettings.posY + calibrationProfile.positionOffset.y + AUGMENTATION_Y_OFFSET,
+        z: currentSettings.posZ + calibrationProfile.positionOffset.z,
+      },
+      scale: calibratedScale,
+      headYawDeg,
+      headPitchDeg,
+      trackingConfidence,
+      trackingVisibleCount,
+    });
+  }
+
+  updateTrackingDebugPanel();
 }
 
 // ===== Update UI controls from current settings =====
@@ -831,6 +1154,7 @@ function updateUIFromSettings() {
   if (rotXVal) rotXVal.textContent = currentSettings.rotX.toString();
   if (rotYVal) rotYVal.textContent = currentSettings.rotY.toString();
   if (rotZVal) rotZVal.textContent = currentSettings.rotZ.toString();
+  updateTrackingDebugPanel();
 }
 
 // ===== Save settings to localStorage =====

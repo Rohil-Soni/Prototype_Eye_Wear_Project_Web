@@ -1,5 +1,7 @@
 // src/faceMeasurement.ts - Face measurement using MediaPipe landmarks
 
+import * as THREE from 'three';
+
 export interface FaceMeasurements {
   faceWidth: number;        // Distance between temples (234-454)
   eyeDistance: number;      // Distance between eyes (left-right)
@@ -30,10 +32,13 @@ export interface LandmarkPoint {
 
 export class FaceMeasurementSystem {
   private measurements: FaceMeasurements[] = [];
-  private measurementInterval: number = 1000; // Measure every 1 second
+  private measurementInterval: number = 120; // Measure roughly 8x per second
   private lastMeasurementTime: number = 0;
   private anchorEntity: any = null;
-  private measurementCallback?: (measurement: FaceMeasurements) => void;
+  private measurementCallbacks: Array<(measurement: FaceMeasurements) => void> = [];
+  private lastSmoothedMeasurement: FaceMeasurements | null = null;
+  private smoothingFactor: number = 0.35;
+  private debugEnabled: boolean = false;
 
   /**
    * Initialize the face measurement system
@@ -61,8 +66,16 @@ export class FaceMeasurementSystem {
    * This allows other systems (like autoAdjuster) to react to new measurements
    */
   onMeasurementUpdate(callback: (measurement: FaceMeasurements) => void) {
-    this.measurementCallback = callback;
+    this.measurementCallbacks.push(callback);
     console.log('🔗 Measurement callback registered');
+  }
+
+  /**
+   * Enable or disable tracking debug output.
+   */
+  setDebugEnabled(enabled: boolean) {
+    this.debugEnabled = enabled;
+    console.log(`🧪 Face tracking debug ${enabled ? 'enabled' : 'disabled'}`);
   }
 
   /**
@@ -101,9 +114,16 @@ export class FaceMeasurementSystem {
     }
 
     try {
-      // Get the anchor's world position (nose bridge - landmark 168)
-      const anchorPos = this.anchorEntity.object3D.position;
-      const anchorScale = this.anchorEntity.object3D.scale.x;
+      this.anchorEntity.object3D.updateMatrixWorld(true);
+
+      // Get the anchor's world transform (nose bridge - landmark 168)
+      const anchorPos = new THREE.Vector3();
+      const anchorQuat = new THREE.Quaternion();
+      const anchorScale = new THREE.Vector3();
+
+      this.anchorEntity.object3D.getWorldPosition(anchorPos);
+      this.anchorEntity.object3D.getWorldQuaternion(anchorQuat);
+      this.anchorEntity.object3D.getWorldScale(anchorScale);
       
       // For nose bridge (168), return anchor position directly
       if (index === 168) {
@@ -117,22 +137,29 @@ export class FaceMeasurementSystem {
       // Estimate other landmarks based on typical face proportions
       // These are relative to nose bridge position
       const estimates: { [key: number]: { x: number; y: number; z: number } } = {
-        234: { x: -0.07 * anchorScale, y: 0.02 * anchorScale, z: -0.01 * anchorScale }, // Left temple
-        454: { x: 0.07 * anchorScale, y: 0.02 * anchorScale, z: -0.01 * anchorScale },  // Right temple
-        10: { x: 0, y: 0.08 * anchorScale, z: 0.02 * anchorScale },  // Forehead
-        152: { x: 0, y: -0.08 * anchorScale, z: 0.01 * anchorScale }, // Chin
-        33: { x: -0.04 * anchorScale, y: 0.01 * anchorScale, z: 0.03 * anchorScale },  // Left eye outer
-        263: { x: 0.04 * anchorScale, y: 0.01 * anchorScale, z: 0.03 * anchorScale },  // Right eye outer
-        130: { x: -0.015 * anchorScale, y: 0, z: 0.02 * anchorScale }, // Left eye inner
-        359: { x: 0.015 * anchorScale, y: 0, z: 0.02 * anchorScale }   // Right eye inner
+        234: { x: -0.07, y: 0.02, z: -0.01 }, // Left temple
+        454: { x: 0.07, y: 0.02, z: -0.01 },  // Right temple
+        10: { x: 0, y: 0.08, z: 0.02 },  // Forehead
+        152: { x: 0, y: -0.08, z: 0.01 }, // Chin
+        33: { x: -0.04, y: 0.01, z: 0.03 },  // Left eye outer
+        263: { x: 0.04, y: 0.01, z: 0.03 },  // Right eye outer
+        130: { x: -0.015, y: 0, z: 0.02 }, // Left eye inner
+        359: { x: 0.015, y: 0, z: 0.02 }   // Right eye inner
       };
       
       const estimate = estimates[index];
       if (estimate) {
+        const offset = new THREE.Vector3(
+          estimate.x * anchorScale.x,
+          estimate.y * anchorScale.y,
+          estimate.z * anchorScale.z,
+        );
+        offset.applyQuaternion(anchorQuat);
+
         return {
-          x: anchorPos.x + estimate.x,
-          y: anchorPos.y + estimate.y,
-          z: anchorPos.z + estimate.z
+          x: anchorPos.x + offset.x,
+          y: anchorPos.y + offset.y,
+          z: anchorPos.z + offset.z
         };
       }
     } catch (e) {
@@ -201,8 +228,14 @@ export class FaceMeasurementSystem {
         timestamp: now
       };
 
+      const smoothedMeasurement = this.lastSmoothedMeasurement
+        ? this.smoothMeasurement(this.lastSmoothedMeasurement, measurement)
+        : measurement;
+
+      this.lastSmoothedMeasurement = smoothedMeasurement;
+
       // Store measurement
-      this.measurements.push(measurement);
+      this.measurements.push(smoothedMeasurement);
       
       // Keep only last 10 measurements
       if (this.measurements.length > 10) {
@@ -212,21 +245,43 @@ export class FaceMeasurementSystem {
       this.lastMeasurementTime = now;
       
       // Notify listeners of new measurement
-      if (this.measurementCallback) {
-        this.measurementCallback(measurement);
+      for (const callback of this.measurementCallbacks) {
+        callback(smoothedMeasurement);
       }
 
       console.log('📊 Face measured:', {
-        width: faceWidth.toFixed(3),
-        eyeDist: eyeDistance.toFixed(3),
-        confidence: (confidence * 100).toFixed(0) + '%'
+        width: smoothedMeasurement.faceWidth.toFixed(3),
+        eyeDist: smoothedMeasurement.eyeDistance.toFixed(3),
+        confidence: (smoothedMeasurement.confidence * 100).toFixed(0) + '%'
       });
 
-      return measurement;
+      if (this.debugEnabled) {
+        const debug = this.getTrackingDebugState();
+        console.log('🧪 Tracking debug snapshot:', debug);
+      }
+
+      return smoothedMeasurement;
     } catch (error) {
       console.error('❌ Face measurement error:', error);
       return null;
     }
+  }
+
+  /**
+   * Smooth measurements to reduce jitter when the face is moving.
+   */
+  private smoothMeasurement(previous: FaceMeasurements, next: FaceMeasurements): FaceMeasurements {
+    const a = this.smoothingFactor;
+    const b = 1 - a;
+
+    return {
+      faceWidth: previous.faceWidth * b + next.faceWidth * a,
+      eyeDistance: previous.eyeDistance * b + next.eyeDistance * a,
+      noseWidth: previous.noseWidth * b + next.noseWidth * a,
+      faceHeight: previous.faceHeight * b + next.faceHeight * a,
+      confidence: previous.confidence * b + next.confidence * a,
+      timestamp: next.timestamp
+    };
   }
 
   /**
@@ -278,6 +333,46 @@ export class FaceMeasurementSystem {
    */
   clearMeasurements() {
     this.measurements = [];
+    this.lastSmoothedMeasurement = null;
     console.log('🗑️ Measurements cleared');
+  }
+
+  /**
+   * Snapshot of the current tracking state for debugging.
+   */
+  getTrackingDebugState() {
+    const latest = this.getLatestMeasurement();
+    const average = this.getAverageMeasurements();
+    const anchor = this.anchorEntity?.object3D;
+    const anchorPosition = new THREE.Vector3();
+    const anchorQuaternion = new THREE.Quaternion();
+    const anchorScale = new THREE.Vector3();
+
+    if (anchor) {
+      anchor.updateMatrixWorld(true);
+      anchor.getWorldPosition(anchorPosition);
+      anchor.getWorldQuaternion(anchorQuaternion);
+      anchor.getWorldScale(anchorScale);
+    }
+
+    return {
+      measurementCount: this.measurements.length,
+      measurementIntervalMs: this.measurementInterval,
+      smoothingFactor: this.smoothingFactor,
+      debugEnabled: this.debugEnabled,
+      anchorVisible: Boolean(anchor?.visible),
+      anchorPosition: {
+        x: anchorPosition.x,
+        y: anchorPosition.y,
+        z: anchorPosition.z
+      },
+      anchorScale: {
+        x: anchorScale.x,
+        y: anchorScale.y,
+        z: anchorScale.z
+      },
+      latest,
+      average
+    };
   }
 }

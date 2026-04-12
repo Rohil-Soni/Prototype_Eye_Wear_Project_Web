@@ -21,6 +21,7 @@ export class AutoAdjuster {
   private updateInterval: number = 2000; // Update every 2 seconds
   private intervalId?: number;
   private adjustScaleAutomatically: boolean = false; // Control whether scale is auto-adjusted
+  private lockedScale: number | null = null;
 
   // Reference measurements (average adult face)
   private readonly REFERENCE_FACE_WIDTH = 0.14; // ~14cm in MindAR units
@@ -84,6 +85,10 @@ export class AutoAdjuster {
     if (!this.adjustScaleAutomatically) {
       return this.baseScale; // Return base scale without adjustment
     }
+
+    if (this.lockedScale !== null) {
+      return this.lockedScale;
+    }
     
     // Calculate scale based on face width (primary factor)
     const widthRatio = measurements.faceWidth / this.REFERENCE_FACE_WIDTH;
@@ -95,7 +100,9 @@ export class AutoAdjuster {
     const scale = (widthRatio * 0.7 + eyeRatio * 0.3) * this.baseScale;
     
     // Clamp scale to reasonable range
-    return Math.max(0.5, Math.min(3.0, scale));
+    const locked = Math.max(0.5, Math.min(3.0, scale));
+    this.lockedScale = locked;
+    return locked;
   }
 
   /**
@@ -106,18 +113,10 @@ export class AutoAdjuster {
     posY: number;
     posZ: number;
   } {
-    // Fine-tune vertical position based on face height ratio
-    const heightRatio = measurements.faceHeight / (this.REFERENCE_FACE_WIDTH * 1.3);
-    const posY = (heightRatio - 1.0) * 0.02; // Small adjustment
-    
-    // Adjust depth based on nose width (wider nose = push glasses forward)
-    const noseRatio = measurements.noseWidth / (this.REFERENCE_FACE_WIDTH * 0.2);
-    const posZ = -0.05 + (noseRatio - 1.0) * 0.01;
-    
     return {
-      posX: 0, // Keep centered
-      posY: Math.max(-0.1, Math.min(0.1, posY)),
-      posZ: Math.max(-0.15, Math.min(0.05, posZ))
+      posX: 0,
+      posY: 0,
+      posZ: 0,
     };
   }
 
@@ -129,8 +128,8 @@ export class AutoAdjuster {
       return;
     }
 
-    // Get average measurements for stability
-    const measurements = this.measurementSystem.getAverageMeasurements();
+    // Prefer latest for responsiveness; fall back to average for startup stability.
+    const measurements = this.measurementSystem.getLatestMeasurement() || this.measurementSystem.getAverageMeasurements();
     
     if (!measurements) {
       console.log('⏳ Waiting for face measurements...');
@@ -157,6 +156,8 @@ export class AutoAdjuster {
 
     console.log('🎯 Auto-adjustment applied:', {
       scale: scale.toFixed(2),
+      faceWidth: measurements.faceWidth.toFixed(3),
+      eyeDistance: measurements.eyeDistance.toFixed(3),
       confidence: (measurements.confidence * 100).toFixed(0) + '%'
     });
 
@@ -176,7 +177,16 @@ export class AutoAdjuster {
    */
   setBaseScale(scale: number) {
     this.baseScale = scale;
+    this.lockedScale = null;
     console.log('📐 Base scale set to:', scale);
+  }
+
+  /**
+   * Clear the locked auto-scale so a new stable fit can be captured.
+   */
+  resetScaleLock() {
+    this.lockedScale = null;
+    console.log('🔄 Auto-scale lock cleared');
   }
 
   /**
@@ -201,6 +211,13 @@ export class AutoAdjuster {
    */
   isEnabled(): boolean {
     return this.isAutoAdjustEnabled;
+  }
+
+  /**
+   * Get the currently locked scale, if any.
+   */
+  getLockedScale(): number | null {
+    return this.lockedScale;
   }
 
   /**
